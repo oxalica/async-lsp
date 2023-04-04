@@ -4,3 +4,13 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
+either = "1.8.1"
+lsp-server = "0.7.0"
+lsp-types = "0.94.0"
+serde_json = "1.0.95"
+thiserror = "1.0.40"
+tokio = { version = "1.27.0", features = ["rt", "sync"] }
+tower = "0.4.13"
+
+[dev-dependencies]
+tokio = { version = "1.27.0", features = ["macros", "rt", "time"] }
