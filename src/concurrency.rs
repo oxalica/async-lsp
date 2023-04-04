@@ -8,6 +8,7 @@ use std::task::{ready, Context, Poll};
 use lsp_server::{ErrorCode, RequestId};
 use lsp_types::notification::{self, Notification};
 use lsp_types::NumberOrString;
+use pin_project_lite::pin_project;
 use tokio::sync::oneshot;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -31,10 +32,7 @@ impl<S> Concurrency<S> {
     }
 }
 
-impl<S: LspService> Service<AnyRequest> for Concurrency<S>
-where
-    S::Future: Send + Unpin,
-{
+impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
     type Response = JsonValue;
     type Error = ResponseError;
     type Future = ResponseFuture<S::Future>;
@@ -50,26 +48,30 @@ where
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         assert!(self.ongoing.len() <= self.max_concurrency);
-        let (tx, rx) = oneshot::channel();
-        self.ongoing.insert(req.id.clone(), tx);
+        let (cancel_tx, cancel_rx) = oneshot::channel();
+        self.ongoing.insert(req.id.clone(), cancel_tx);
         let fut = self.service.call(req);
-        ResponseFuture(fut, rx)
+        ResponseFuture { fut, cancel_rx }
     }
 }
 
-pub struct ResponseFuture<Fut>(Fut, oneshot::Receiver<Infallible>);
+pin_project! {
+    pub struct ResponseFuture<Fut> {
+        #[pin]
+        fut: Fut,
+        cancel_rx: oneshot::Receiver<Infallible>,
+    }
+}
 
-impl<Fut> Future for ResponseFuture<Fut>
-where
-    Fut: Future<Output = Result<JsonValue, ResponseError>> + Unpin,
-{
+impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
     type Output = Fut::Output;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if let Poll::Ready(ret) = Pin::new(&mut self.0).poll(cx) {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        if let Poll::Ready(ret) = this.fut.poll(cx) {
             return Poll::Ready(ret);
         }
-        match ready!(Pin::new(&mut self.1).poll(cx)) {
+        match ready!(Pin::new(this.cancel_rx).poll(cx)) {
             Ok(never) => match never {},
             Err(_) => Poll::Ready(Err(ResponseError {
                 code: ErrorCode::RequestCanceled as _,
@@ -80,10 +82,7 @@ where
     }
 }
 
-impl<S: LspService> LspService for Concurrency<S>
-where
-    S::Future: Send + Unpin,
-{
+impl<S: LspService> LspService for Concurrency<S> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         if notif.method == notification::Cancel::METHOD {
             if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {
