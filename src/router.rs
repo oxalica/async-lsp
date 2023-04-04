@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use lsp_server::ErrorCode;
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
-use tower::Service;
+use tower_service::Service;
 
 use crate::{AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result};
 

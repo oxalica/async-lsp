@@ -11,7 +11,7 @@ use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use serde_json::Value as JsonValue;
 use tokio::sync::{mpsc, oneshot};
-use tower::Service;
+use tower_service::Service;
 
 pub mod concurrency;
 pub mod router;

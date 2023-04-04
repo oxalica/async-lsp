@@ -6,7 +6,8 @@ use either::Either;
 use lsp_server::ErrorCode;
 use lsp_types::notification::{self, Notification};
 use lsp_types::request::{self, Request};
-use tower::{Layer, Service};
+use tower_layer::Layer;
+use tower_service::Service;
 
 use crate::{AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result};
 

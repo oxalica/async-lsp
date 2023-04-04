@@ -9,7 +9,8 @@ use lsp_server::{ErrorCode, RequestId};
 use lsp_types::notification::{self, Notification};
 use lsp_types::NumberOrString;
 use tokio::sync::oneshot;
-use tower::{Layer, Service};
+use tower_layer::Layer;
+use tower_service::Service;
 
 use crate::{AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
 
