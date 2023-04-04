@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::{ready, Future};
 use std::ops::ControlFlow;
@@ -9,19 +10,24 @@ use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use tower_service::Service;
 
-use crate::{AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result};
+use crate::{
+    AnyEvent, AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result,
+};
 
 pub struct Router<S> {
     state: S,
     req_handlers: HashMap<&'static str, BoxReqHandler<S>>,
     notif_handlers: HashMap<&'static str, BoxNotifHandler<S>>,
+    event_handlers: HashMap<TypeId, BoxEventHandler<S>>,
     unhandled_req: BoxReqHandler<S>,
     unhandled_notif: BoxNotifHandler<S>,
+    unhandled_event: BoxEventHandler<S>,
 }
 
 type BoxReqFuture = Pin<Box<dyn Future<Output = Result<JsonValue, ResponseError>> + Send>>;
 type BoxReqHandler<S> = Box<dyn Fn(&mut S, AnyRequest) -> BoxReqFuture>;
 type BoxNotifHandler<S> = Box<dyn Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>>>;
+type BoxEventHandler<S> = Box<dyn Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>>>;
 
 impl<S: Default> Default for Router<S> {
     fn default() -> Self {
@@ -35,6 +41,7 @@ impl<S> Router<S> {
             state,
             req_handlers: HashMap::new(),
             notif_handlers: HashMap::new(),
+            event_handlers: HashMap::new(),
             unhandled_req: Box::new(|_, req| {
                 Box::pin(ready(Err(ResponseError {
                     code: ErrorCode::MethodNotFound as _,
@@ -52,6 +59,9 @@ impl<S> Router<S> {
                     ))))
                 }
             }),
+            unhandled_event: Box::new(|_, event| {
+                ControlFlow::Break(Err(Error::Protocol(format!("Unhandled event: {event:?}"))))
+            }),
         }
     }
 
@@ -66,9 +76,9 @@ impl<S> Router<S> {
         self.req_handlers.insert(
             R::METHOD,
             Box::new(
-                move |service, req| match serde_json::from_value::<R::Params>(req.params) {
+                move |state, req| match serde_json::from_value::<R::Params>(req.params) {
                     Ok(params) => {
-                        let fut = handler(service, params);
+                        let fut = handler(state, params);
                         Box::pin(async move {
                             Ok(serde_json::to_value(fut.await?).expect("Serialization failed"))
                         })
@@ -90,11 +100,25 @@ impl<S> Router<S> {
     ) -> &mut Self {
         self.notif_handlers.insert(
             N::METHOD,
-            Box::new(move |service, notif| {
-                match serde_json::from_value::<N::Params>(notif.params) {
-                    Ok(params) => handler(service, params),
+            Box::new(
+                move |state, notif| match serde_json::from_value::<N::Params>(notif.params) {
+                    Ok(params) => handler(state, params),
                     Err(err) => ControlFlow::Break(Err(err.into())),
-                }
+                },
+            ),
+        );
+        self
+    }
+
+    pub fn event<E: Send + 'static>(
+        &mut self,
+        handler: impl Fn(&mut S, E) -> ControlFlow<Result<()>> + 'static,
+    ) -> &mut Self {
+        self.event_handlers.insert(
+            TypeId::of::<E>(),
+            Box::new(move |state, event| {
+                let event = event.downcast::<E>().expect("Checked TypeId");
+                handler(state, event)
             }),
         );
         self
@@ -107,7 +131,7 @@ impl<S> Router<S> {
     where
         Fut: Future<Output = Result<JsonValue, ResponseError>> + Send + 'static,
     {
-        self.unhandled_req = Box::new(move |service, req| Box::pin(handler(service, req)));
+        self.unhandled_req = Box::new(move |state, req| Box::pin(handler(state, req)));
         self
     }
 
@@ -116,6 +140,14 @@ impl<S> Router<S> {
         handler: impl Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + 'static,
     ) -> &mut Self {
         self.unhandled_notif = Box::new(handler);
+        self
+    }
+
+    pub fn unhandled_event(
+        &mut self,
+        handler: impl Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + 'static,
+    ) -> &mut Self {
+        self.unhandled_event = Box::new(handler);
         self
     }
 }
@@ -145,5 +177,13 @@ impl<S> LspService for Router<S> {
             .get(&*notif.method)
             .unwrap_or(&self.unhandled_notif);
         h(&mut self.state, notif)
+    }
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
+        let h = self
+            .event_handlers
+            .get(&event.inner_type_id())
+            .unwrap_or(&self.unhandled_event);
+        h(&mut self.state, event)
     }
 }

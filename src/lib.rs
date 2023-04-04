@@ -1,7 +1,8 @@
+use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::poll_fn;
-use std::io;
 use std::ops::ControlFlow;
+use std::{fmt, io};
 
 use lsp_server::{
     Message, Notification as AnyNotification, Request as AnyRequest, RequestId, Response,
@@ -34,20 +35,23 @@ pub enum Error {
 
 pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = ResponseError> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>>;
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>>;
 }
 
 pub struct Server<S> {
     service: S,
-    tx: mpsc::Sender<Event>,
-    rx: mpsc::Receiver<Event>,
+    tx: mpsc::Sender<MainLoopEvent>,
+    rx: mpsc::Receiver<MainLoopEvent>,
     outgoing_id: i32,
     outgoing: HashMap<RequestId, oneshot::Sender<Response>>,
 }
 
-enum Event {
+enum MainLoopEvent {
     Incoming(Message),
     Outgoing(Message),
     OutgoingRequest(AnyRequest, oneshot::Sender<Response>),
+    Any(AnyEvent),
 }
 
 impl<S: LspService> Server<S>
@@ -80,7 +84,10 @@ where
             .spawn(move || {
                 let mut stdin = io::stdin().lock();
                 while let Some(msg) = Message::read(&mut stdin).expect("Failed to read message") {
-                    if reader_tx.blocking_send(Event::Incoming(msg)).is_err() {
+                    if reader_tx
+                        .blocking_send(MainLoopEvent::Incoming(msg))
+                        .is_err()
+                    {
                         break;
                     }
                 }
@@ -98,7 +105,7 @@ where
 
         while let Some(event) = self.rx.recv().await {
             match event {
-                Event::Incoming(Message::Request(req)) => {
+                MainLoopEvent::Incoming(Message::Request(req)) => {
                     if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
                         let resp = Response {
                             id: req.id,
@@ -131,22 +138,23 @@ where
                         if let Some(tx) = weak_tx.upgrade() {
                             // If the channel closed, the error already propagates to the main
                             // loop.
-                            let _: Result<_, _> = tx.send(Event::Outgoing(resp.into())).await;
+                            let _: Result<_, _> =
+                                tx.send(MainLoopEvent::Outgoing(resp.into())).await;
                         }
                     });
                 }
-                Event::Incoming(Message::Response(resp)) => {
+                MainLoopEvent::Incoming(Message::Response(resp)) => {
                     if let Some(resp_tx) = self.outgoing.remove(&resp.id) {
                         // The result may be ignored.
                         let _: Result<_, _> = resp_tx.send(resp);
                     }
                 }
-                Event::Incoming(Message::Notification(notif)) => {
+                MainLoopEvent::Incoming(Message::Notification(notif)) => {
                     if let ControlFlow::Break(b) = self.service.notify(notif) {
                         return b;
                     }
                 }
-                Event::OutgoingRequest(mut req, resp_tx) => {
+                MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
                     req.id = RequestId::from(self.outgoing_id);
                     assert!(self.outgoing.insert(req.id.clone(), resp_tx).is_none());
                     self.outgoing_id += 1;
@@ -155,11 +163,16 @@ where
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
                 }
-                Event::Outgoing(msg) => {
+                MainLoopEvent::Outgoing(msg) => {
                     writer_tx
                         .send(msg)
                         .await
                         .map_err(|_| Error::ChannelClosed)?;
+                }
+                MainLoopEvent::Any(event) => {
+                    if let ControlFlow::Break(b) = self.service.emit(event) {
+                        return b;
+                    }
                 }
             }
         }
@@ -170,7 +183,7 @@ where
 
 #[derive(Debug, Clone)]
 pub struct Client {
-    tx: mpsc::WeakSender<Event>,
+    tx: mpsc::WeakSender<MainLoopEvent>,
 }
 
 impl Client {
@@ -179,7 +192,7 @@ impl Client {
         self.tx
             .upgrade()
             .ok_or(Error::ChannelClosed)?
-            .send(Event::Outgoing(notif.into()))
+            .send(MainLoopEvent::Outgoing(notif.into()))
             .await
             .map_err(|_| Error::ChannelClosed)
     }
@@ -190,13 +203,50 @@ impl Client {
         self.tx
             .upgrade()
             .ok_or(Error::ChannelClosed)?
-            .send(Event::OutgoingRequest(req, tx))
+            .send(MainLoopEvent::OutgoingRequest(req, tx))
             .await
             .map_err(|_| Error::ChannelClosed)?;
         let resp = rx.await.map_err(|_| Error::ChannelClosed)?;
         match resp.error {
             None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
             Some(err) => Err(Error::Response(err)),
+        }
+    }
+
+    pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
+        self.tx
+            .upgrade()
+            .ok_or(Error::ChannelClosed)?
+            .send(MainLoopEvent::Any(AnyEvent::new(event)))
+            .await
+            .map_err(|_| Error::ChannelClosed)
+    }
+}
+
+pub struct AnyEvent(Box<dyn Any + Send>, &'static str);
+
+impl fmt::Debug for AnyEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AnyEvent")
+            .field("type", &self.1)
+            .finish_non_exhaustive()
+    }
+}
+
+impl AnyEvent {
+    fn new<T: Send + 'static>(v: T) -> Self {
+        AnyEvent(Box::new(v), type_name::<T>())
+    }
+
+    fn inner_type_id(&self) -> TypeId {
+        // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
+        Any::type_id(&*self.0)
+    }
+
+    pub fn downcast<T: Send + 'static>(self) -> Result<T, Self> {
+        match self.0.downcast::<T>() {
+            Ok(v) => Ok(*v),
+            Err(b) => Err(Self(b, self.1)),
         }
     }
 }

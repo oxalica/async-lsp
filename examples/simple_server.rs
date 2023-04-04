@@ -14,12 +14,28 @@ use tower::ServiceBuilder;
 
 struct ServerState {
     client: Client,
+    counter: i32,
 }
+
+struct TickEvent;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let server = async_lsp::Server::new(1, |client| {
-        let mut router = Router::new(ServerState { client });
+        tokio::spawn({
+            let client = client.clone();
+            async move {
+                let mut interval = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    interval.tick().await;
+                    if client.emit(TickEvent).await.is_err() {
+                        break;
+                    };
+                }
+            }
+        });
+
+        let mut router = Router::new(ServerState { client, counter: 0 });
         router
             .request::<request::Initialize, _>(|_, params| async move {
                 eprintln!("Initialize with {params:?}");
@@ -34,6 +50,7 @@ async fn main() {
             })
             .request::<request::HoverRequest, _>(|st, _| {
                 let client = st.client.clone();
+                let counter = st.counter;
                 async move {
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     client
@@ -44,9 +61,9 @@ async fn main() {
                         .await
                         .unwrap();
                     Ok(Some(Hover {
-                        contents: HoverContents::Scalar(MarkedString::String(
-                            "I am a hover text!".into(),
-                        )),
+                        contents: HoverContents::Scalar(MarkedString::String(format!(
+                            "I am a hover text {counter}!"
+                        ))),
                         range: None,
                     }))
                 }
@@ -57,7 +74,11 @@ async fn main() {
             .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidOpenTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidChangeTextDocument>(|_, _| ControlFlow::Continue(()))
-            .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()));
+            .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()))
+            .event::<TickEvent>(|st, _| {
+                st.counter += 1;
+                ControlFlow::Continue(())
+            });
 
         ServiceBuilder::new()
             .layer(CatchUnwindLayer::new())

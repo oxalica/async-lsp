@@ -13,7 +13,7 @@ use tokio::sync::oneshot;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
+use crate::{AnyEvent, AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
 
 pub struct Concurrency<S> {
     service: S,
@@ -95,6 +95,10 @@ impl<S: LspService> LspService for Concurrency<S> {
             return ControlFlow::Continue(());
         }
         self.service.notify(notif)
+    }
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
+        self.service.emit(event)
     }
 }
 

@@ -10,7 +10,7 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
+use crate::{AnyEvent, AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
 
 pub struct CatchUnwind<S> {
     service: S,
@@ -119,6 +119,10 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for Response
 impl<S: LspService> LspService for CatchUnwind<S> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         self.service.notify(notif)
+    }
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
+        self.service.emit(event)
     }
 }
 

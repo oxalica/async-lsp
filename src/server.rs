@@ -9,7 +9,9 @@ use lsp_types::request::{self, Request};
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result};
+use crate::{
+    AnyEvent, AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result,
+};
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum State {
@@ -93,6 +95,10 @@ impl<S: LspService> LspService for Lifecycle<S> {
             }
             _ => self.service.notify(notif),
         }
+    }
+
+    fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
+        self.service.emit(event)
     }
 }
 
