@@ -2,6 +2,7 @@ use std::ops::ControlFlow;
 use std::time::Duration;
 
 use async_lsp::concurrency::ConcurrencyLayer;
+use async_lsp::monitor::ClientProcessMonitorLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
@@ -35,7 +36,10 @@ async fn main() {
             }
         });
 
-        let mut router = Router::new(ServerState { client, counter: 0 });
+        let mut router = Router::new(ServerState {
+            client: client.clone(),
+            counter: 0,
+        });
         router
             .request::<request::Initialize, _>(|_, params| async move {
                 eprintln!("Initialize with {params:?}");
@@ -81,9 +85,10 @@ async fn main() {
             });
 
         ServiceBuilder::new()
-            .layer(CatchUnwindLayer::new())
             .layer(LifecycleLayer)
+            .layer(CatchUnwindLayer::new())
             .layer(ConcurrencyLayer::new(4))
+            .layer(ClientProcessMonitorLayer::new(client))
             .service(router)
     });
     server.run().await.unwrap();

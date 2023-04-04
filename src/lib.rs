@@ -15,6 +15,7 @@ use tokio::sync::{mpsc, oneshot};
 use tower_service::Service;
 
 pub mod concurrency;
+pub mod monitor;
 pub mod panic;
 pub mod router;
 pub mod server;
