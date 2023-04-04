@@ -8,6 +8,10 @@ categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 
+[features]
+default = ["stdio"]
+stdio = ["tokio/net"]
+
 [dependencies]
 either = "1.8.1"
 lsp-server = "0.7.0"
@@ -25,5 +29,5 @@ libc = "0.2.141"
 tokio = { version = "1.27.0", features = ["net"] }
 
 [dev-dependencies]
-tokio = { version = "1.27.0", features = ["macros", "rt", "time"] }
+tokio = { version = "1.27.0", features = ["io-util", "macros", "rt", "time"] }
 tower = "0.4.13"

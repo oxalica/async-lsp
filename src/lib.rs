@@ -20,6 +20,9 @@ pub mod panic;
 pub mod router;
 pub mod server;
 
+#[cfg(all(feature = "stdio", unix))]
+pub mod stdio;
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
