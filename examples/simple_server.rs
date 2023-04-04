@@ -2,12 +2,13 @@ use std::ops::ControlFlow;
 use std::time::Duration;
 
 use async_lsp::concurrency::ConcurrencyLayer;
+use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::Client;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
-    MarkedString, MessageType, ServerCapabilities, ShowMessageParams,
+    MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
 use tower::ServiceBuilder;
 
@@ -25,6 +26,7 @@ async fn main() {
                 Ok(InitializeResult {
                     capabilities: ServerCapabilities {
                         hover_provider: Some(HoverProviderCapability::Simple(true)),
+                        definition_provider: Some(OneOf::Left(true)),
                         ..ServerCapabilities::default()
                     },
                     server_info: None,
@@ -49,12 +51,16 @@ async fn main() {
                     }))
                 }
             })
+            .request::<request::GotoDefinition, _>(|_, _| async move {
+                unimplemented!("Not yet implemented!")
+            })
             .notification::<notification::DidChangeConfiguration>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidOpenTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidChangeTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()));
 
         ServiceBuilder::new()
+            .layer(CatchUnwindLayer::new())
             .layer(LifecycleLayer)
             .layer(ConcurrencyLayer::new(4))
             .service(router)
