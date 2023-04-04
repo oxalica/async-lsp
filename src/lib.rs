@@ -188,25 +188,24 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
-        let notif = AnyNotification::new(N::METHOD.into(), params);
+    async fn send(&self, v: MainLoopEvent) -> Result<()> {
         self.tx
             .upgrade()
             .ok_or(Error::ChannelClosed)?
-            .send(MainLoopEvent::Outgoing(notif.into()))
+            .send(v)
             .await
             .map_err(|_| Error::ChannelClosed)
+    }
+
+    pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+        let notif = AnyNotification::new(N::METHOD.into(), params);
+        self.send(MainLoopEvent::Outgoing(notif.into())).await
     }
 
     pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
         let (tx, rx) = oneshot::channel();
         let req = AnyRequest::new(RequestId::from(0), R::METHOD.into(), params);
-        self.tx
-            .upgrade()
-            .ok_or(Error::ChannelClosed)?
-            .send(MainLoopEvent::OutgoingRequest(req, tx))
-            .await
-            .map_err(|_| Error::ChannelClosed)?;
+        self.send(MainLoopEvent::OutgoingRequest(req, tx)).await?;
         let resp = rx.await.map_err(|_| Error::ChannelClosed)?;
         match resp.error {
             None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
@@ -215,12 +214,7 @@ impl Client {
     }
 
     pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
-        self.tx
-            .upgrade()
-            .ok_or(Error::ChannelClosed)?
-            .send(MainLoopEvent::Any(AnyEvent::new(event)))
-            .await
-            .map_err(|_| Error::ChannelClosed)
+        self.send(MainLoopEvent::Any(AnyEvent::new(event))).await
     }
 }
 
