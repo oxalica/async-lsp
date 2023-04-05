@@ -5,13 +5,13 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use lsp_server::ErrorCode;
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result,
+    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, JsonValue, LspService, ResponseError,
+    Result,
 };
 
 pub struct Router<S> {
@@ -44,7 +44,7 @@ impl<S> Router<S> {
             event_handlers: HashMap::new(),
             unhandled_req: Box::new(|_, req| {
                 Box::pin(ready(Err(ResponseError {
-                    code: ErrorCode::MethodNotFound as _,
+                    code: ErrorCode::METHOD_NOT_FOUND,
                     message: format!("No such method {}", req.method),
                     data: None,
                 })))
@@ -84,7 +84,7 @@ impl<S> Router<S> {
                         })
                     }
                     Err(err) => Box::pin(ready(Err(ResponseError {
-                        code: ErrorCode::InvalidParams as _,
+                        code: ErrorCode::INVALID_PARAMS,
                         message: format!("Failed to deserialize parameters: {err}"),
                         data: None,
                     }))),

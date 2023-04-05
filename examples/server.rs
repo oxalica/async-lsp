@@ -11,6 +11,7 @@ use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
+use tokio::io::BufReader;
 use tower::ServiceBuilder;
 
 struct ServerState {
@@ -91,5 +92,8 @@ async fn main() {
             .layer(ClientProcessMonitorLayer::new(client))
             .service(router)
     });
-    server.run().await.unwrap();
+
+    let stdin = BufReader::new(tokio::io::stdin());
+    let stdout = tokio::io::stdout();
+    server.run(stdin, stdout).await.unwrap();
 }

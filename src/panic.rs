@@ -5,12 +5,13 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use lsp_server::ErrorCode;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{AnyEvent, AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
+use crate::{
+    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
+};
 
 pub struct CatchUnwind<S> {
     service: S,
@@ -38,7 +39,7 @@ fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError 
         },
     };
     ResponseError {
-        code: ErrorCode::InternalError as _,
+        code: ErrorCode::INTERNAL_ERROR,
         message: format!("Request handler of {method} paniced: {msg}"),
         data: None,
     }

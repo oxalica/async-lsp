@@ -5,15 +5,16 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-use lsp_server::{ErrorCode, RequestId};
 use lsp_types::notification::{self, Notification};
-use lsp_types::NumberOrString;
 use pin_project_lite::pin_project;
 use tokio::sync::oneshot;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{AnyEvent, AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
+use crate::{
+    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, RequestId,
+    ResponseError, Result,
+};
 
 pub struct Concurrency<S> {
     service: S,
@@ -74,7 +75,7 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for Response
         match ready!(Pin::new(this.cancel_rx).poll(cx)) {
             Ok(never) => match never {},
             Err(_) => Poll::Ready(Err(ResponseError {
-                code: ErrorCode::RequestCanceled as _,
+                code: ErrorCode::REQUEST_CANCELLED,
                 message: "Client cancelled the request".into(),
                 data: None,
             })),
@@ -86,11 +87,7 @@ impl<S: LspService> LspService for Concurrency<S> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         if notif.method == notification::Cancel::METHOD {
             if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {
-                let id = match params.id {
-                    NumberOrString::Number(i) => RequestId::from(i),
-                    NumberOrString::String(i) => RequestId::from(i),
-                };
-                self.ongoing.remove(&id);
+                self.ongoing.remove(&params.id);
             }
             return ControlFlow::Continue(());
         }

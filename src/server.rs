@@ -3,14 +3,14 @@ use std::ops::ControlFlow;
 use std::task::{Context, Poll};
 
 use either::Either;
-use lsp_server::ErrorCode;
 use lsp_types::notification::{self, Notification};
 use lsp_types::request::{self, Request};
 use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Error, JsonValue, LspService, ResponseError, Result,
+    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, JsonValue, LspService, ResponseError,
+    Result,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -54,13 +54,13 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
             }
             (State::Uninitialized | State::Initializing, _) => {
                 Either::Right(ready(Err(ResponseError {
-                    code: ErrorCode::ServerNotInitialized as _,
+                    code: ErrorCode::SERVER_NOT_INITIALIZED,
                     message: "Server is not initialized yet".into(),
                     data: None,
                 })))
             }
             (_, request::Initialize::METHOD) => Either::Right(ready(Err(ResponseError {
-                code: ErrorCode::InvalidRequest as _,
+                code: ErrorCode::INVALID_REQUEST,
                 message: "Server is already initialized".into(),
                 data: None,
             }))),
@@ -71,7 +71,7 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                 Either::Left(self.service.call(req))
             }
             (State::ShuttingDown, _) => Either::Right(ready(Err(ResponseError {
-                code: ErrorCode::InvalidRequest as _,
+                code: ErrorCode::INVALID_REQUEST,
                 message: "Server is shutting down".into(),
                 data: None,
             }))),
