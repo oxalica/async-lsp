@@ -1,13 +1,17 @@
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
-use std::future::poll_fn;
+use std::future::{poll_fn, Future};
 use std::ops::ControlFlow;
-use std::pin::pin;
+use std::pin::{pin, Pin};
+use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use futures::stream::FuturesUnordered;
+use futures::{select_biased, FutureExt, StreamExt};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
+use pin_project_lite::pin_project;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
@@ -193,7 +197,7 @@ pub struct ResponseError {
 impl Message {
     const CONTENT_LENGTH: &str = "Content-Length";
 
-    async fn read(reader: &mut (impl AsyncBufRead + Unpin)) -> Result<Self> {
+    async fn read(mut reader: impl AsyncBufRead + Unpin) -> Result<Self> {
         let mut line = String::new();
         let mut content_len = None;
         loop {
@@ -220,7 +224,7 @@ impl Message {
         Ok(serde_json::from_slice(&buf)?)
     }
 
-    async fn write(&self, writer: &mut (impl AsyncWrite + Unpin)) -> Result<()> {
+    async fn write(&self, mut writer: impl AsyncWrite + Unpin) -> Result<()> {
         let buf = serde_json::to_string(self)?;
         writer
             .write_all(format!("{}: {}\r\n\r\n", Self::CONTENT_LENGTH, buf.len()).as_bytes())
@@ -231,162 +235,136 @@ impl Message {
     }
 }
 
-pub struct Server<S> {
+pub struct Server<S: LspService> {
     service: S,
-    tx: mpsc::Sender<MainLoopEvent>,
     rx: mpsc::Receiver<MainLoopEvent>,
     outgoing_id: i32,
     outgoing: HashMap<RequestId, oneshot::Sender<AnyResponse>>,
+    tasks: FuturesUnordered<RequestFuture<S::Future>>,
 }
 
 enum MainLoopEvent {
-    Incoming(Message),
     Outgoing(Message),
     OutgoingRequest(AnyRequest, oneshot::Sender<AnyResponse>),
     Any(AnyEvent),
 }
 
-impl<S: LspService> Server<S>
-where
-    S::Future: Send + 'static,
-{
+impl<S: LspService> Server<S> {
     pub fn new(channel_size: usize, builder: impl FnOnce(Client) -> S) -> Self {
         let (tx, rx) = mpsc::channel(channel_size);
-        let client = Client { tx: tx.downgrade() };
+        let client = Client { tx };
         let state = builder(client);
         Self {
             service: state,
             rx,
-            tx,
             outgoing_id: 0,
             outgoing: HashMap::new(),
+            tasks: FuturesUnordered::new(),
         }
     }
 
-    pub async fn run(
-        mut self,
-        input: impl AsyncBufRead + Send + 'static,
-        output: impl AsyncWrite + Send + 'static,
-    ) -> Result<()> {
-        // The strong reference is kept in the reader thread, so the it stops the main loop when
-        // error occurs.
-        let weak_tx = self.tx.downgrade();
-        let reader_tx = self.tx;
+    pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
+        let input = pin!(input);
+        let mut input = pin!(futures::stream::unfold(input, |mut input| async move {
+            Some((Message::read(&mut input).await, input))
+        }));
+        let mut output = pin!(output);
 
-        // TODO: Poll in the same task.
-        let (writer_tx, mut writer_rx) = mpsc::channel(1);
-        tokio::spawn(async move {
-            let mut input = pin!(input);
-            loop {
-                let msg = Message::read(&mut input)
-                    .await
-                    .expect("Failed to read message");
-                if reader_tx.send(MainLoopEvent::Incoming(msg)).await.is_err() {
-                    break;
+        loop {
+            let ctl = select_biased! {
+                msg = input.next() => self.dispatch_message(msg.expect("Never ends")?).await,
+                event = self.rx.recv().fuse() => self.dispatch_event(event.expect("Sender is alive")),
+                resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
+            };
+            let msg = match ctl {
+                ControlFlow::Continue(Some(msg)) => msg,
+                ControlFlow::Continue(None) => continue,
+                ControlFlow::Break(ret) => return ret,
+            };
+            // TODO: Async write.
+            Message::write(&msg, &mut output).await?;
+        }
+    }
+
+    async fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
+        match msg {
+            Message::Request(req) => {
+                if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
+                    let resp = AnyResponse {
+                        id: req.id,
+                        result: None,
+                        error: Some(err),
+                    };
+                    return ControlFlow::Continue(Some(Message::Response(resp)));
+                }
+                let id = req.id.clone();
+                let fut = self.service.call(req);
+                self.tasks.push(RequestFuture { fut, id: Some(id) });
+            }
+            Message::Response(resp) => {
+                if let Some(resp_tx) = self.outgoing.remove(&resp.id) {
+                    // The result may be ignored.
+                    let _: Result<_, _> = resp_tx.send(resp);
                 }
             }
-        });
-        tokio::spawn(async move {
-            let mut output = pin!(output);
-            while let Some(msg) = writer_rx.recv().await {
-                Message::write(&msg, &mut output)
-                    .await
-                    .expect("Failed to write message");
-            }
-        });
-
-        while let Some(event) = self.rx.recv().await {
-            match event {
-                MainLoopEvent::Incoming(Message::Request(req)) => {
-                    if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
-                        let resp = AnyResponse {
-                            id: req.id,
-                            result: None,
-                            error: Some(err),
-                        };
-                        writer_tx
-                            .send(Message::Response(resp))
-                            .await
-                            .map_err(|_| Error::ChannelClosed)?;
-                        continue;
-                    }
-
-                    let id = req.id.clone();
-                    let fut = self.service.call(req);
-                    let weak_tx = weak_tx.clone();
-                    tokio::spawn(async move {
-                        let resp = match fut.await {
-                            Ok(v) => AnyResponse {
-                                id,
-                                result: Some(v),
-                                error: None,
-                            },
-                            Err(err) => AnyResponse {
-                                id,
-                                result: None,
-                                error: Some(err),
-                            },
-                        };
-                        if let Some(tx) = weak_tx.upgrade() {
-                            // If the channel closed, the error already propagates to the main
-                            // loop.
-                            let _: Result<_, _> = tx
-                                .send(MainLoopEvent::Outgoing(Message::Response(resp)))
-                                .await;
-                        }
-                    });
-                }
-                MainLoopEvent::Incoming(Message::Response(resp)) => {
-                    if let Some(resp_tx) = self.outgoing.remove(&resp.id) {
-                        // The result may be ignored.
-                        let _: Result<_, _> = resp_tx.send(resp);
-                    }
-                }
-                MainLoopEvent::Incoming(Message::Notification(notif)) => {
-                    if let ControlFlow::Break(b) = self.service.notify(notif) {
-                        return b;
-                    }
-                }
-                MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
-                    req.id = RequestId::Number(self.outgoing_id);
-                    assert!(self.outgoing.insert(req.id.clone(), resp_tx).is_none());
-                    self.outgoing_id += 1;
-                    writer_tx
-                        .send(Message::Request(req))
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-                }
-                MainLoopEvent::Outgoing(msg) => {
-                    writer_tx
-                        .send(msg)
-                        .await
-                        .map_err(|_| Error::ChannelClosed)?;
-                }
-                MainLoopEvent::Any(event) => {
-                    if let ControlFlow::Break(b) = self.service.emit(event) {
-                        return b;
-                    }
-                }
+            Message::Notification(notif) => {
+                self.service.notify(notif)?;
             }
         }
+        ControlFlow::Continue(None)
+    }
 
-        Err(Error::ChannelClosed)
+    fn dispatch_event(&mut self, event: MainLoopEvent) -> ControlFlow<Result<()>, Option<Message>> {
+        match event {
+            MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
+                req.id = RequestId::Number(self.outgoing_id);
+                assert!(self.outgoing.insert(req.id.clone(), resp_tx).is_none());
+                self.outgoing_id += 1;
+                ControlFlow::Continue(Some(Message::Request(req)))
+            }
+            MainLoopEvent::Outgoing(msg) => ControlFlow::Continue(Some(msg)),
+            MainLoopEvent::Any(event) => {
+                self.service.emit(event)?;
+                ControlFlow::Continue(None)
+            }
+        }
+    }
+}
+
+pin_project! {
+    struct RequestFuture<Fut> {
+        #[pin]
+        fut: Fut,
+        id: Option<RequestId>,
+    }
+}
+
+impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestFuture<Fut> {
+    type Output = AnyResponse;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        let (mut result, mut error) = (None, None);
+        match ready!(this.fut.poll(cx)) {
+            Ok(v) => result = Some(v),
+            Err(err) => error = Some(err),
+        }
+        Poll::Ready(AnyResponse {
+            id: this.id.take().expect("Future is consumed"),
+            result,
+            error,
+        })
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Client {
-    tx: mpsc::WeakSender<MainLoopEvent>,
+    tx: mpsc::Sender<MainLoopEvent>,
 }
 
 impl Client {
     async fn send(&self, v: MainLoopEvent) -> Result<()> {
-        self.tx
-            .upgrade()
-            .ok_or(Error::ChannelClosed)?
-            .send(v)
-            .await
-            .map_err(|_| Error::ChannelClosed)
+        self.tx.send(v).await.map_err(|_| Error::ChannelClosed)
     }
 
     pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {

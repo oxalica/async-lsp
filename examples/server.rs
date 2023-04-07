@@ -6,6 +6,7 @@ use async_lsp::monitor::ClientProcessMonitorLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
+use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::Client;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
@@ -93,7 +94,7 @@ async fn main() {
             .service(router)
     });
 
-    let stdin = BufReader::new(tokio::io::stdin());
-    let stdout = tokio::io::stdout();
+    let stdin = BufReader::new(PipeStdin::lock().unwrap());
+    let stdout = PipeStdout::lock().unwrap();
     server.run(stdin, stdout).await.unwrap();
 }
