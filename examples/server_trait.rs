@@ -7,7 +7,8 @@ use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
-use async_lsp::{Client, LanguageClient, LanguageServer, ResponseError};
+use async_lsp::{Client, LanguageClient, LanguageServer, LanguageServerSnapshot, ResponseError};
+use async_trait::async_trait;
 use futures::future::BoxFuture;
 use lsp_types::{
     DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
@@ -17,6 +18,7 @@ use lsp_types::{
 use tokio::io::BufReader;
 use tower::ServiceBuilder;
 
+#[derive(Debug, Clone)]
 struct ServerState {
     client: Client,
     counter: i32,
@@ -24,6 +26,7 @@ struct ServerState {
 
 impl LanguageServer for ServerState {
     type Error = ResponseError;
+    type Snapshot = Self;
 
     fn initialize(
         &mut self,
@@ -42,39 +45,45 @@ impl LanguageServer for ServerState {
         })
     }
 
-    fn hover(&mut self, _: HoverParams) -> BoxFuture<'static, Result<Option<Hover>, Self::Error>> {
-        let client = self.client.clone();
-        let counter = self.counter;
-        Box::pin(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            client
-                .show_message(ShowMessageParams {
-                    typ: MessageType::INFO,
-                    message: "Hello LSP".into(),
-                })
-                .await
-                .unwrap();
-            Ok(Some(Hover {
-                contents: HoverContents::Scalar(MarkedString::String(format!(
-                    "I am a hover text {counter}!"
-                ))),
-                range: None,
-            }))
-        })
-    }
-
-    fn definition(
-        &mut self,
-        _: GotoDefinitionParams,
-    ) -> BoxFuture<'static, Result<Option<GotoDefinitionResponse>, ResponseError>> {
-        unimplemented!("Not yet implemented!");
-    }
-
     fn did_change_configuration(
         &mut self,
         _: DidChangeConfigurationParams,
     ) -> ControlFlow<async_lsp::Result<()>> {
         ControlFlow::Continue(())
+    }
+
+    fn snapshot(&mut self) -> Self::Snapshot {
+        self.clone()
+    }
+}
+
+#[async_trait]
+impl LanguageServerSnapshot for ServerState {
+    type Error = ResponseError;
+
+    async fn hover(self, _: HoverParams) -> Result<Option<Hover>, Self::Error> {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        self.client
+            .show_message(ShowMessageParams {
+                typ: MessageType::INFO,
+                message: "Hello LSP".into(),
+            })
+            .await
+            .unwrap();
+        Ok(Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(format!(
+                "I am a hover text {}!",
+                self.counter,
+            ))),
+            range: None,
+        }))
+    }
+
+    async fn definition(
+        self,
+        _: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>, ResponseError> {
+        unimplemented!("Not yet implemented!");
     }
 }
 

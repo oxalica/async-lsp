@@ -31,7 +31,7 @@ pub mod stdio;
 #[cfg(feature = "omni-trait")]
 mod omni_trait;
 #[cfg(feature = "omni-trait")]
-pub use omni_trait::{LanguageClient, LanguageServer};
+pub use omni_trait::{LanguageClient, LanguageServer, LanguageServerSnapshot};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 

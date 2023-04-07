@@ -1,6 +1,7 @@
 use std::future::ready;
 use std::ops::ControlFlow;
 
+use async_trait::async_trait;
 use futures::future::BoxFuture;
 use lsp_types::notification::{self, Notification};
 use lsp_types::request::{self, Request};
@@ -11,18 +12,13 @@ use crate::{Client, Error, ErrorCode, ResponseError, Result};
 
 type ResponseFuture<R, E> = BoxFuture<'static, Result<<R as Request>::Result, E>>;
 
-fn method_not_found<R, E>() -> ResponseFuture<R, E>
-where
-    R: Request,
-    R::Result: Send + 'static,
-    E: From<ResponseError> + Send + 'static,
-{
-    Box::pin(ready(Err(ResponseError {
+fn method_not_found<R: Request, E: From<ResponseError>>() -> Result<R::Result, E> {
+    Err(ResponseError {
         code: ErrorCode::METHOD_NOT_FOUND,
         message: format!("No such method: {}", R::METHOD),
         data: None,
     }
-    .into())))
+    .into())
 }
 
 fn notification_not_found<N: Notification>() -> ControlFlow<Result<()>> {
@@ -57,8 +53,11 @@ macro_rules! define_server {
     ) => {
         pub trait LanguageServer {
             type Error: From<ResponseError> + Into<ResponseError> + Send + 'static;
+            type Snapshot: LanguageServerSnapshot<Error = Self::Error> + Send + 'static;
 
-            // Requests.
+            fn snapshot(&mut self) -> Self::Snapshot;
+
+            // Lifecycle requests.
 
             fn initialize(
                 &mut self,
@@ -71,16 +70,6 @@ macro_rules! define_server {
             ) -> ResponseFuture<request::Shutdown, Self::Error> {
                 Box::pin(ready(Ok(())))
             }
-
-            $(
-            fn $req_snake(
-                &mut self,
-                params: <$req as Request>::Params,
-            ) -> ResponseFuture<$req, Self::Error> {
-                let _ = params;
-                method_not_found::<$req, _>()
-            }
-            )*
 
             // Notifications.
 
@@ -102,6 +91,22 @@ macro_rules! define_server {
             )*
         }
 
+        #[async_trait]
+        pub trait LanguageServerSnapshot: Sized {
+            type Error: From<ResponseError>;
+
+            $(
+            async fn $req_snake(
+                self,
+                params: <$req as Request>::Params,
+            ) -> Result<<$req as Request>::Result, Self::Error> {
+                let _ = params;
+                method_not_found::<$req, Self::Error>()
+            }
+            )*
+
+        }
+
         impl<S: LanguageServer> Router<S> {
             pub fn from_language_server(state: S) -> Self {
                 let mut this = Self::new(state);
@@ -114,8 +119,10 @@ macro_rules! define_server {
                     async move { fut.await.map_err(Into::into) }
                 });
                 $(this.request::<$req, _>(|state, params| {
-                    let fut = state.$req_snake(params);
-                    async move { fut.await.map_err(Into::into) }
+                    let snap = state.snapshot();
+                    async move {
+                        snap.$req_snake(params).await.map_err(Into::into)
+                    }
                 });)*
                 this.notification::<notification::Exit>(|state, params| state.exit(params));
                 $(this.notification::<$notif>(|state, params| state.$notif_snake(params));)*
