@@ -72,7 +72,6 @@ impl<S> Router<S> {
     where
         Fut: Future<Output = Result<R::Result, ResponseError>> + Send + 'static,
     {
-        self.unhandled_req = Box::new(|_, _| todo!());
         self.req_handlers.insert(
             R::METHOD,
             Box::new(

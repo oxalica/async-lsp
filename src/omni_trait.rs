@@ -105,10 +105,19 @@ macro_rules! define_server {
         impl<S: LanguageServer> Router<S> {
             pub fn from_language_server(state: S) -> Self {
                 let mut this = Self::new(state);
+                this.request::<request::Initialize, _>(|state, params| {
+                    let fut = state.initialize(params);
+                    async move { fut.await.map_err(Into::into) }
+                });
+                this.request::<request::Shutdown, _>(|state, params| {
+                    let fut = state.shutdown(params);
+                    async move { fut.await.map_err(Into::into) }
+                });
                 $(this.request::<$req, _>(|state, params| {
                     let fut = state.$req_snake(params);
                     async move { fut.await.map_err(Into::into) }
                 });)*
+                this.notification::<notification::Exit>(|state, params| state.exit(params));
                 $(this.notification::<$notif>(|state, params| state.$notif_snake(params));)*
                 this
             }

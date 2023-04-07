@@ -40,7 +40,7 @@ fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError 
     };
     ResponseError {
         code: ErrorCode::INTERNAL_ERROR,
-        message: format!("Request handler of {method} paniced: {msg}"),
+        message: format!("Request handler of {method} panicked: {msg}"),
         data: None,
     }
 }
