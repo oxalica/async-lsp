@@ -28,6 +28,11 @@ pub mod server;
 #[cfg(all(feature = "stdio", unix))]
 pub mod stdio;
 
+#[cfg(feature = "omni-trait")]
+mod omni_trait;
+#[cfg(feature = "omni-trait")]
+pub use omni_trait::{LanguageClient, LanguageServer};
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
@@ -369,21 +374,30 @@ impl Client {
             method: N::METHOD.into(),
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
+        self.notify_any(notif).await
+    }
+
+    async fn notify_any(&self, notif: AnyNotification) -> Result<()> {
         self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
             .await
     }
 
     pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
-        let (tx, rx) = oneshot::channel();
         let req = AnyRequest {
             id: RequestId::Number(0),
             method: R::METHOD.into(),
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
+        let ret = self.request_any(req).await?;
+        Ok(serde_json::from_value(ret)?)
+    }
+
+    async fn request_any(&self, req: AnyRequest) -> Result<JsonValue> {
+        let (tx, rx) = oneshot::channel();
         self.send(MainLoopEvent::OutgoingRequest(req, tx)).await?;
         let resp = rx.await.map_err(|_| Error::ServiceStopped)?;
         match resp.error {
-            None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
+            None => Ok(resp.result.unwrap_or_default()),
             Some(err) => Err(Error::Response(err)),
         }
     }

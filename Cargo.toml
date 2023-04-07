@@ -9,10 +9,12 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 
 [features]
-default = ["stdio"]
+default = ["omni-trait", "stdio"]
+omni-trait = []
 stdio = ["tokio/net"]
 
 [dependencies]
+async-trait = "0.1.68"
 either = "1.8.1"
 futures = { version = "0.3.28", default-features = false, features = ["async-await", "std"] }
 lsp-types = "0.94.0"
