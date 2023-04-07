@@ -33,15 +33,15 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    #[error("Channel closed")]
-    ChannelClosed,
-    #[error("Deserialization failed: {0}")]
+    #[error("service is stopped")]
+    ServiceStopped,
+    #[error("deserialization failed: {0}")]
     Deserialize(#[from] serde_json::Error),
-    #[error("Error response {}: {}", .0.code, .0.message)]
+    #[error("{0}")]
     Response(ResponseError),
-    #[error("Protocol error: {0}")]
+    #[error("protocol error: {0}")]
     Protocol(String),
-    #[error("IO error: {0}")]
+    #[error("{0}")]
     Io(#[from] io::Error),
 }
 
@@ -51,27 +51,15 @@ pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = Response
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>>;
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AnyRequest {
-    pub id: RequestId,
-    pub method: String,
-    #[serde(default)]
-    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
-    pub params: serde_json::Value,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Error,
+)]
+#[error("jsonrpc error {0}")]
 pub struct ErrorCode(pub i32);
 
 impl From<i32> for ErrorCode {
     fn from(i: i32) -> Self {
         Self(i)
-    }
-}
-
-impl fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
     }
 }
 
@@ -169,6 +157,15 @@ enum Message {
     Notification(AnyNotification),
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnyRequest {
+    pub id: RequestId,
+    pub method: String,
+    #[serde(default)]
+    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
+    pub params: serde_json::Value,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnyNotification {
     pub method: String,
@@ -187,7 +184,7 @@ struct AnyResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Error)]
-#[error("{code}: {message} (data = {data:?})")]
+#[error("{message} ({code})")]
 pub struct ResponseError {
     pub code: ErrorCode,
     pub message: String,
@@ -364,7 +361,7 @@ pub struct Client {
 
 impl Client {
     async fn send(&self, v: MainLoopEvent) -> Result<()> {
-        self.tx.send(v).await.map_err(|_| Error::ChannelClosed)
+        self.tx.send(v).await.map_err(|_| Error::ServiceStopped)
     }
 
     pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
@@ -384,7 +381,7 @@ impl Client {
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
         self.send(MainLoopEvent::OutgoingRequest(req, tx)).await?;
-        let resp = rx.await.map_err(|_| Error::ChannelClosed)?;
+        let resp = rx.await.map_err(|_| Error::ServiceStopped)?;
         match resp.error {
             None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
             Some(err) => Err(Error::Response(err)),
