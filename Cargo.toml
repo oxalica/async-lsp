@@ -7,6 +7,7 @@ keywords = ["lsp", "language-server", "tower"]
 categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
+exclude = ["/generate_omni_trait.sh"]
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio"]
