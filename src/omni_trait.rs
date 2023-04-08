@@ -7,7 +7,7 @@ use lsp_types::request::{self, Request};
 use lsp_types::{lsp_notification, lsp_request};
 
 use crate::router::Router;
-use crate::{ClientSocket, ErrorCode, ResponseError, Result};
+use crate::{ClientSocket, ErrorCode, ResponseError, Result, ServerSocket};
 
 use self::sealed::NotifyResult;
 
@@ -20,7 +20,7 @@ mod sealed {
 
     impl NotifyResult for ControlFlow<crate::Result<()>> {
         fn fallback<N: Notification>() -> Self {
-            if N::METHOD.starts_with("$/") {
+            if N::METHOD.starts_with("$/") || N::METHOD == "exit" || N::METHOD == "initialized" {
                 ControlFlow::Continue(())
             } else {
                 ControlFlow::Break(Err(crate::Error::Protocol(format!(
@@ -78,7 +78,8 @@ macro_rules! define_server {
         { $($notif_snake:ident, $notif:ty;)* }
     ) => {
         pub trait LanguageServer {
-            type Error: From<ResponseError> + Into<ResponseError> + Send + 'static;
+            type Error: From<ResponseError> + Send + 'static;
+            type NotifyResult: NotifyResult;
 
             // Requests.
 
@@ -106,25 +107,98 @@ macro_rules! define_server {
 
             // Notifications.
 
+            fn initialized(
+                &mut self,
+                params: <notification::Initialized as Notification>::Params,
+            ) -> Self::NotifyResult {
+                let _ = params;
+                Self::NotifyResult::fallback::<notification::Initialized>()
+            }
+
             fn exit(
                 &mut self,
                 (): <notification::Exit as Notification>::Params,
-            ) -> ControlFlow<Result<()>> {
-                ControlFlow::Break(Ok(()))
+            ) -> Self::NotifyResult {
+                Self::NotifyResult::fallback::<notification::Exit>()
             }
 
             $(
             fn $notif_snake(
                 &mut self,
                 params: <$notif as Notification>::Params,
-            ) -> ControlFlow<Result<()>> {
+            ) -> Self::NotifyResult {
                 let _ = params;
-                ControlFlow::fallback::<$notif>()
+                Self::NotifyResult::fallback::<$notif>()
             }
             )*
         }
 
-        impl<S: LanguageServer> Router<S> {
+        impl LanguageServer for ServerSocket {
+            type Error = crate::Error;
+            type NotifyResult = BoxFuture<'static, Result<(), Self::Error>>;
+
+            // Requests.
+
+            fn initialize(
+                &mut self,
+                params: <request::Initialize as Request>::Params,
+            ) -> ResponseFuture<request::Initialize, Self::Error> {
+                let socket = self.clone();
+                Box::pin(async move { socket.request::<request::Initialize>(params).await })
+            }
+
+            fn shutdown(
+                &mut self,
+                (): <request::Shutdown as Request>::Params,
+            ) -> ResponseFuture<request::Shutdown, Self::Error> {
+                let socket = self.clone();
+                Box::pin(async move { socket.request::<request::Shutdown>(()).await })
+            }
+
+            $(
+            fn $req_snake(
+                &mut self,
+                params: <$req as Request>::Params,
+            ) -> ResponseFuture<$req, Self::Error> {
+                let socket = self.clone();
+                Box::pin(async move { socket.request::<$req>(params).await })
+            }
+            )*
+
+            // Notifications.
+
+            fn initialized(
+                &mut self,
+                params: <notification::Initialized as Notification>::Params,
+            ) -> Self::NotifyResult {
+                let socket = self.clone();
+                Box::pin(async move { socket.notify::<notification::Initialized>(params).await })
+            }
+
+            fn exit(
+                &mut self,
+                (): <notification::Exit as Notification>::Params,
+            ) -> Self::NotifyResult {
+                let socket = self.clone();
+                Box::pin(async move { socket.notify::<notification::Exit>(()).await })
+            }
+
+            $(
+            fn $notif_snake(
+                &mut self,
+                params: <$notif as Notification>::Params,
+            ) -> Self::NotifyResult {
+                let socket = self.clone();
+                Box::pin(async move { socket.notify::<$notif>(params).await })
+            }
+            )*
+        }
+
+        impl<S> Router<S>
+        where
+            S: LanguageServer<NotifyResult = ControlFlow<crate::Result<()>>>,
+            ResponseError: From<S::Error>,
+        {
             pub fn from_language_server(state: S) -> Self {
                 let mut this = Self::new(state);
                 this.request::<request::Initialize, _>(|state, params| {

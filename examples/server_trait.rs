@@ -26,6 +26,7 @@ struct ServerState {
 
 impl LanguageServer for ServerState {
     type Error = ResponseError;
+    type NotifyResult = ControlFlow<async_lsp::Result<()>>;
 
     fn initialize(
         &mut self,

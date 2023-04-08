@@ -6,9 +6,7 @@ use async_lsp::concurrency::ConcurrencyLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::tracing::TracingLayer;
-use async_lsp::{LanguageClient, ResponseError};
-use lsp_types::notification::{DidOpenTextDocument, Exit, Initialized};
-use lsp_types::request::{HoverRequest, Initialize, Shutdown};
+use async_lsp::{LanguageClient, LanguageServer, ResponseError};
 use lsp_types::{
     ClientCapabilities, DidOpenTextDocumentParams, HoverParams, InitializeParams,
     InitializedParams, NumberOrString, Position, ProgressParams, ProgressParamsValue,
@@ -72,7 +70,7 @@ struct Stop;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let (indexed_tx, indexed_rx) = oneshot::channel();
-    let (frontend, server) = async_lsp::Frontend::new_client(1, |_server| {
+    let (frontend, mut server) = async_lsp::Frontend::new_client(1, |_server| {
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(CatchUnwindLayer::new())
@@ -108,10 +106,9 @@ async fn main() {
                 .expect("Invalid CWD");
             let root_uri = Url::from_file_path(&root_dir).unwrap();
 
-            // TODO: impl LanguageServer for ServerSocket
             // Initialize.
             let init_ret = server
-                .request::<Initialize>(InitializeParams {
+                .initialize(InitializeParams {
                     root_uri: Some(root_uri),
                     capabilities: ClientCapabilities {
                         window: Some(WindowClientCapabilities {
@@ -125,16 +122,13 @@ async fn main() {
                 .await
                 .unwrap();
             info!("Initialized: {init_ret:?}");
-            server
-                .notify::<Initialized>(InitializedParams {})
-                .await
-                .unwrap();
+            server.initialized(InitializedParams {}).await.unwrap();
 
             // Synchronize documents.
             let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
             let text = "fn func() { let var = 1; }";
             server
-                .notify::<DidOpenTextDocument>(DidOpenTextDocumentParams {
+                .did_open(DidOpenTextDocumentParams {
                     text_document: TextDocumentItem {
                         uri: file_uri.clone(),
                         language_id: "rust".into(),
@@ -151,7 +145,7 @@ async fn main() {
             // Query.
             let var_pos = text.find("var").unwrap();
             let hover_ret = server
-                .request::<HoverRequest>(HoverParams {
+                .hover(HoverParams {
                     text_document_position_params: TextDocumentPositionParams {
                         text_document: TextDocumentIdentifier { uri: file_uri },
                         position: Position::new(0, var_pos as _),
@@ -163,16 +157,11 @@ async fn main() {
             info!("Hover result: {hover_ret:?}");
 
             // Shutdown.
-            server.request::<Shutdown>(()).await.unwrap();
-            server.notify::<Exit>(()).await.unwrap();
+            server.shutdown(()).await.unwrap();
+            server.exit(()).await.unwrap();
 
             server.emit(Stop).await.unwrap();
             frontend_fut.await.unwrap();
         })
         .await;
-}
-
-#[allow(dead_code, unused_variables)]
-fn test_ra() {
-    let test_var = 42;
 }
