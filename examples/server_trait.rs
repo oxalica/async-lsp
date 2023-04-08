@@ -7,6 +7,7 @@ use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
+use async_lsp::tracing::TracingLayer;
 use async_lsp::{Client, LanguageClient, LanguageServer, ResponseError};
 use futures::future::BoxFuture;
 use lsp_types::{
@@ -16,6 +17,7 @@ use lsp_types::{
 };
 use tokio::io::BufReader;
 use tower::ServiceBuilder;
+use tracing::{info, Level};
 
 struct ServerState {
     client: Client,
@@ -88,6 +90,7 @@ impl ServerState {
     }
 
     fn on_tick(&mut self, _: TickEvent) -> ControlFlow<async_lsp::Result<()>> {
+        info!("tick");
         self.counter += 1;
         ControlFlow::Continue(())
     }
@@ -110,12 +113,19 @@ async fn main() {
         });
 
         ServiceBuilder::new()
+            .layer(TracingLayer::default())
             .layer(LifecycleLayer)
             .layer(CatchUnwindLayer::new())
             .layer(ConcurrencyLayer::new(4))
             .layer(ClientProcessMonitorLayer::new(client.clone()))
             .service(ServerState::new_router(client))
     });
+
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .init();
 
     let stdin = BufReader::new(PipeStdin::lock().unwrap());
     let stdout = PipeStdout::lock().unwrap();

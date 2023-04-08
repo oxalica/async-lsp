@@ -10,10 +10,11 @@ repository = "https://github.com/oxalica/async-lsp"
 exclude = ["/generate_omni_trait.sh"]
 
 [features]
-default = ["client-monitor", "omni-trait", "stdio"]
+default = ["client-monitor", "omni-trait", "stdio", "tracing"]
 client-monitor = ["rustix/process", "tokio/net"]
 omni-trait = []
 stdio = ["rustix/fs", "tokio/net"]
+tracing = ["dep:tracing"]
 
 [dependencies]
 async-trait = "0.1.68"
@@ -28,7 +29,9 @@ thiserror = "1.0.40"
 tokio = { version = "1.27.0", features = ["io-util", "rt", "sync"] }
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
+tracing = { version = "0.1.37", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "rt", "time"] }
 tower = "0.4.13"
+tracing-subscriber = "0.3.16"

@@ -30,6 +30,9 @@ pub mod client_monitor;
 #[cfg(all(feature = "stdio", unix))]
 pub mod stdio;
 
+#[cfg(feature = "tracing")]
+pub mod tracing;
+
 #[cfg(feature = "omni-trait")]
 mod omni_trait;
 #[cfg(feature = "omni-trait")]
@@ -427,6 +430,10 @@ impl AnyEvent {
     fn inner_type_id(&self) -> TypeId {
         // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
         Any::type_id(&*self.0)
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        self.1
     }
 
     pub fn downcast<T: Send + 'static>(self) -> Result<T, Self> {

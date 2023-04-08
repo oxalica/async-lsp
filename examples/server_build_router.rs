@@ -7,6 +7,7 @@ use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
+use async_lsp::tracing::TracingLayer;
 use async_lsp::Client;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
@@ -14,6 +15,7 @@ use lsp_types::{
 };
 use tokio::io::BufReader;
 use tower::ServiceBuilder;
+use tracing::{info, Level};
 
 struct ServerState {
     client: Client,
@@ -82,17 +84,25 @@ async fn main() {
             .notification::<notification::DidChangeTextDocument>(|_, _| ControlFlow::Continue(()))
             .notification::<notification::DidCloseTextDocument>(|_, _| ControlFlow::Continue(()))
             .event::<TickEvent>(|st, _| {
+                info!("tick");
                 st.counter += 1;
                 ControlFlow::Continue(())
             });
 
         ServiceBuilder::new()
+            .layer(TracingLayer::default())
             .layer(LifecycleLayer)
             .layer(CatchUnwindLayer::new())
             .layer(ConcurrencyLayer::new(4))
             .layer(ClientProcessMonitorLayer::new(client))
             .service(router)
     });
+
+    tracing_subscriber::fmt()
+        .with_max_level(Level::INFO)
+        .with_ansi(false)
+        .with_writer(std::io::stderr)
+        .init();
 
     let stdin = BufReader::new(PipeStdin::lock().unwrap());
     let stdout = PipeStdout::lock().unwrap();
