@@ -1,8 +1,8 @@
 use std::ops::ControlFlow;
 use std::time::Duration;
 
+use async_lsp::client_monitor::ClientProcessMonitorLayer;
 use async_lsp::concurrency::ConcurrencyLayer;
-use async_lsp::monitor::ClientProcessMonitorLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;

@@ -25,7 +25,7 @@ pub mod router;
 pub mod server;
 
 #[cfg(all(feature = "client-monitor", target_os = "linux"))]
-pub mod monitor;
+pub mod client_monitor;
 
 #[cfg(all(feature = "stdio", unix))]
 pub mod stdio;
