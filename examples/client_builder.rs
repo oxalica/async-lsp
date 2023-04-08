@@ -16,7 +16,6 @@ use lsp_types::{
 };
 use tokio::io::BufReader;
 use tokio::sync::oneshot;
-use tokio::task::LocalSet;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 
@@ -77,74 +76,69 @@ async fn main() {
     let stdout = BufReader::new(child.stdout.unwrap());
     let stdin = child.stdin.unwrap();
 
-    // FIXME: Make `Frontend: Send`.
-    LocalSet::new()
-        .run_until(async move {
-            let frontend_fut = tokio::task::spawn_local(async move {
-                frontend.run(stdout, stdin).await.unwrap();
-            });
+    let frontend_fut = tokio::spawn(async move {
+        frontend.run(stdout, stdin).await.unwrap();
+    });
 
-            let root_dir = current_dir()
-                .and_then(|path| path.canonicalize())
-                .expect("Invalid CWD");
-            let root_uri = Url::from_file_path(&root_dir).unwrap();
+    let root_dir = current_dir()
+        .and_then(|path| path.canonicalize())
+        .expect("Invalid CWD");
+    let root_uri = Url::from_file_path(&root_dir).unwrap();
 
-            // Initialize.
-            let init_ret = server
-                .initialize(InitializeParams {
-                    root_uri: Some(root_uri),
-                    capabilities: ClientCapabilities {
-                        window: Some(WindowClientCapabilities {
-                            work_done_progress: Some(true),
-                            ..WindowClientCapabilities::default()
-                        }),
-                        ..ClientCapabilities::default()
-                    },
-                    ..InitializeParams::default()
-                })
-                .await
-                .unwrap();
-            info!("Initialized: {init_ret:?}");
-            server.initialized(InitializedParams {}).await.unwrap();
-
-            // Synchronize documents.
-            let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
-            let text = "fn func() { let var = 1; }";
-            server
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: file_uri.clone(),
-                        language_id: "rust".into(),
-                        version: 0,
-                        text: text.into(),
-                    },
-                })
-                .await
-                .unwrap();
-
-            // Wait until indexed.
-            indexed_rx.await.unwrap();
-
-            // Query.
-            let var_pos = text.find("var").unwrap();
-            let hover_ret = server
-                .hover(HoverParams {
-                    text_document_position_params: TextDocumentPositionParams {
-                        text_document: TextDocumentIdentifier { uri: file_uri },
-                        position: Position::new(0, var_pos as _),
-                    },
-                    work_done_progress_params: WorkDoneProgressParams::default(),
-                })
-                .await
-                .unwrap();
-            info!("Hover result: {hover_ret:?}");
-
-            // Shutdown.
-            server.shutdown(()).await.unwrap();
-            server.exit(()).await.unwrap();
-
-            server.emit(Stop).await.unwrap();
-            frontend_fut.await.unwrap();
+    // Initialize.
+    let init_ret = server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities {
+                window: Some(WindowClientCapabilities {
+                    work_done_progress: Some(true),
+                    ..WindowClientCapabilities::default()
+                }),
+                ..ClientCapabilities::default()
+            },
+            ..InitializeParams::default()
         })
-        .await;
+        .await
+        .unwrap();
+    info!("Initialized: {init_ret:?}");
+    server.initialized(InitializedParams {}).await.unwrap();
+
+    // Synchronize documents.
+    let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
+    let text = "fn func() { let var = 1; }";
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: file_uri.clone(),
+                language_id: "rust".into(),
+                version: 0,
+                text: text.into(),
+            },
+        })
+        .await
+        .unwrap();
+
+    // Wait until indexed.
+    indexed_rx.await.unwrap();
+
+    // Query.
+    let var_pos = text.find("var").unwrap();
+    let hover_ret = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: file_uri },
+                position: Position::new(0, var_pos as _),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap();
+    info!("Hover result: {hover_ret:?}");
+
+    // Shutdown.
+    server.shutdown(()).await.unwrap();
+    server.exit(()).await.unwrap();
+
+    server.emit(Stop).await.unwrap();
+    frontend_fut.await.unwrap();
 }

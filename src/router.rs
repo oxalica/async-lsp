@@ -25,9 +25,9 @@ pub struct Router<S> {
 }
 
 type BoxReqFuture = Pin<Box<dyn Future<Output = Result<JsonValue, ResponseError>> + Send>>;
-type BoxReqHandler<S> = Box<dyn Fn(&mut S, AnyRequest) -> BoxReqFuture>;
-type BoxNotifHandler<S> = Box<dyn Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>>>;
-type BoxEventHandler<S> = Box<dyn Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>>>;
+type BoxReqHandler<S> = Box<dyn Fn(&mut S, AnyRequest) -> BoxReqFuture + Send>;
+type BoxNotifHandler<S> = Box<dyn Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + Send>;
+type BoxEventHandler<S> = Box<dyn Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + Send>;
 
 impl<S: Default> Default for Router<S> {
     fn default() -> Self {
@@ -67,7 +67,7 @@ impl<S> Router<S> {
 
     pub fn request<R: Request, Fut>(
         &mut self,
-        handler: impl Fn(&mut S, R::Params) -> Fut + 'static,
+        handler: impl Fn(&mut S, R::Params) -> Fut + Send + 'static,
     ) -> &mut Self
     where
         Fut: Future<Output = Result<R::Result, ResponseError>> + Send + 'static,
@@ -95,7 +95,7 @@ impl<S> Router<S> {
 
     pub fn notification<N: Notification>(
         &mut self,
-        handler: impl Fn(&mut S, N::Params) -> ControlFlow<Result<()>> + 'static,
+        handler: impl Fn(&mut S, N::Params) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.notif_handlers.insert(
             N::METHOD,
@@ -111,7 +111,7 @@ impl<S> Router<S> {
 
     pub fn event<E: Send + 'static>(
         &mut self,
-        handler: impl Fn(&mut S, E) -> ControlFlow<Result<()>> + 'static,
+        handler: impl Fn(&mut S, E) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.event_handlers.insert(
             TypeId::of::<E>(),
@@ -125,7 +125,7 @@ impl<S> Router<S> {
 
     pub fn unhandled_request<Fut>(
         &mut self,
-        handler: impl Fn(&mut S, AnyRequest) -> Fut + 'static,
+        handler: impl Fn(&mut S, AnyRequest) -> Fut + Send + 'static,
     ) -> &mut Self
     where
         Fut: Future<Output = Result<JsonValue, ResponseError>> + Send + 'static,
@@ -136,7 +136,7 @@ impl<S> Router<S> {
 
     pub fn unhandled_notification(
         &mut self,
-        handler: impl Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + 'static,
+        handler: impl Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.unhandled_notif = Box::new(handler);
         self
@@ -144,7 +144,7 @@ impl<S> Router<S> {
 
     pub fn unhandled_event(
         &mut self,
-        handler: impl Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + 'static,
+        handler: impl Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.unhandled_event = Box::new(handler);
         self
@@ -184,5 +184,14 @@ impl<S> LspService for Router<S> {
             .get(&event.inner_type_id())
             .unwrap_or(&self.unhandled_event);
         h(&mut self.state, event)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn _assert_send<S: Send>(router: Router<S>) -> impl Send {
+        router
     }
 }
