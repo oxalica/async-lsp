@@ -242,7 +242,7 @@ impl Message {
     }
 }
 
-pub struct Server<S: LspService> {
+pub struct Frontend<S: LspService> {
     service: S,
     rx: mpsc::Receiver<MainLoopEvent>,
     outgoing_id: i32,
@@ -256,13 +256,15 @@ enum MainLoopEvent {
     Any(AnyEvent),
 }
 
-impl<S: LspService> Server<S> {
-    pub fn new(channel_size: usize, builder: impl FnOnce(Client) -> S) -> Self {
+impl<S: LspService> Frontend<S> {
+    pub fn new_server(channel_size: usize, builder: impl FnOnce(ClientSocket) -> S) -> Self {
+        Self::new(channel_size, |socket| builder(ClientSocket(socket)))
+    }
+
+    fn new(channel_size: usize, builder: impl FnOnce(RemoteSocket) -> S) -> Self {
         let (tx, rx) = mpsc::channel(channel_size);
-        let client = Client { tx };
-        let state = builder(client);
         Self {
-            service: state,
+            service: builder(RemoteSocket { tx }),
             rx,
             outgoing_id: 0,
             outgoing: HashMap::new(),
@@ -365,16 +367,33 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
 }
 
 #[derive(Debug, Clone)]
-pub struct Client {
+pub struct ClientSocket(RemoteSocket);
+
+impl ClientSocket {
+    pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+        self.0.notify::<N>(params).await
+    }
+
+    pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
+        self.0.request::<R>(params).await
+    }
+
+    pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
+        self.0.emit::<E>(event).await
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RemoteSocket {
     tx: mpsc::Sender<MainLoopEvent>,
 }
 
-impl Client {
+impl RemoteSocket {
     async fn send(&self, v: MainLoopEvent) -> Result<()> {
         self.tx.send(v).await.map_err(|_| Error::ServiceStopped)
     }
 
-    pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+    async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
         let notif = AnyNotification {
             method: N::METHOD.into(),
             params: serde_json::to_value(params).expect("Failed to serialize"),
@@ -387,7 +406,7 @@ impl Client {
             .await
     }
 
-    pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
+    async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
         let req = AnyRequest {
             id: RequestId::Number(0),
             method: R::METHOD.into(),

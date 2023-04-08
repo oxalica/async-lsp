@@ -7,19 +7,19 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Client, Error, JsonValue, LspService, ResponseError,
-    Result,
+    AnyEvent, AnyNotification, AnyRequest, ClientSocket, Error, JsonValue, LspService,
+    ResponseError, Result,
 };
 
 struct ClientProcessExited;
 
 pub struct ClientProcessMonitor<S> {
     service: S,
-    client: Client,
+    client: ClientSocket,
 }
 
 impl<S> ClientProcessMonitor<S> {
-    pub fn new(service: S, client: Client) -> Self {
+    pub fn new(service: S, client: ClientSocket) -> Self {
         Self { service, client }
     }
 }
@@ -94,11 +94,11 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
 }
 
 pub struct ClientProcessMonitorLayer {
-    client: Client,
+    client: ClientSocket,
 }
 
 impl ClientProcessMonitorLayer {
-    pub fn new(client: Client) -> Self {
+    pub fn new(client: ClientSocket) -> Self {
         Self { client }
     }
 }

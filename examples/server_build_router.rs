@@ -8,7 +8,7 @@ use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
-use async_lsp::Client;
+use async_lsp::ClientSocket;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
@@ -18,7 +18,7 @@ use tower::ServiceBuilder;
 use tracing::{info, Level};
 
 struct ServerState {
-    client: Client,
+    client: ClientSocket,
     counter: i32,
 }
 
@@ -26,7 +26,7 @@ struct TickEvent;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let server = async_lsp::Server::new(1, |client| {
+    let server = async_lsp::Frontend::new_server(1, |client| {
         tokio::spawn({
             let client = client.clone();
             async move {

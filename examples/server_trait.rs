@@ -8,7 +8,7 @@ use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
-use async_lsp::{Client, LanguageClient, LanguageServer, ResponseError};
+use async_lsp::{ClientSocket, LanguageClient, LanguageServer, ResponseError};
 use futures::future::BoxFuture;
 use lsp_types::{
     DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
@@ -20,7 +20,7 @@ use tower::ServiceBuilder;
 use tracing::{info, Level};
 
 struct ServerState {
-    client: Client,
+    client: ClientSocket,
     counter: i32,
 }
 
@@ -83,7 +83,7 @@ impl LanguageServer for ServerState {
 struct TickEvent;
 
 impl ServerState {
-    fn new_router(client: Client) -> Router<Self> {
+    fn new_router(client: ClientSocket) -> Router<Self> {
         let mut router = Router::from_language_server(Self { client, counter: 0 });
         router.event(Self::on_tick);
         router
@@ -98,7 +98,7 @@ impl ServerState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let server = async_lsp::Server::new(1, |client| {
+    let server = async_lsp::Frontend::new_server(1, |client| {
         tokio::spawn({
             let client = client.clone();
             async move {

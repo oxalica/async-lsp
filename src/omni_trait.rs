@@ -7,7 +7,7 @@ use lsp_types::request::{self, Request};
 use lsp_types::{lsp_notification, lsp_request};
 
 use crate::router::Router;
-use crate::{Client, Error, ErrorCode, ResponseError, Result};
+use crate::{ClientSocket, Error, ErrorCode, ResponseError, Result};
 
 type ResponseFuture<R, E> = BoxFuture<'static, Result<<R as Request>::Result, E>>;
 
@@ -150,7 +150,7 @@ macro_rules! define_client {
             )*
         }
 
-        impl LanguageClient for Client {
+        impl LanguageClient for ClientSocket {
             type Error = crate::Error;
 
             // Requests.
