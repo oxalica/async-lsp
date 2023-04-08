@@ -98,7 +98,7 @@ impl ServerState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let server = async_lsp::Frontend::new_server(1, |client| {
+    let (server, _) = async_lsp::Frontend::new_server(1, |client| {
         tokio::spawn({
             let client = client.clone();
             async move {

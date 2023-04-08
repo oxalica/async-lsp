@@ -257,19 +257,33 @@ enum MainLoopEvent {
 }
 
 impl<S: LspService> Frontend<S> {
-    pub fn new_server(channel_size: usize, builder: impl FnOnce(ClientSocket) -> S) -> Self {
-        Self::new(channel_size, |socket| builder(ClientSocket(socket)))
+    pub fn new_server(
+        channel_size: usize,
+        builder: impl FnOnce(ClientSocket) -> S,
+    ) -> (Self, ClientSocket) {
+        let (this, socket) = Self::new(channel_size, |socket| builder(ClientSocket(socket)));
+        (this, ClientSocket(socket))
     }
 
-    fn new(channel_size: usize, builder: impl FnOnce(RemoteSocket) -> S) -> Self {
+    pub fn new_client(
+        channel_size: usize,
+        builder: impl FnOnce(ServerSocket) -> S,
+    ) -> (Self, ServerSocket) {
+        let (this, socket) = Self::new(channel_size, |socket| builder(ServerSocket(socket)));
+        (this, ServerSocket(socket))
+    }
+
+    fn new(channel_size: usize, builder: impl FnOnce(RemoteSocket) -> S) -> (Self, RemoteSocket) {
         let (tx, rx) = mpsc::channel(channel_size);
-        Self {
-            service: builder(RemoteSocket { tx }),
+        let socket = RemoteSocket { tx };
+        let this = Self {
+            service: builder(socket.clone()),
             rx,
             outgoing_id: 0,
             outgoing: HashMap::new(),
             tasks: FuturesUnordered::new(),
-        }
+        };
+        (this, socket)
     }
 
     pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
@@ -366,22 +380,31 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
     }
 }
 
+macro_rules! impl_socket_wrapper {
+    ($name:ident) => {
+        impl $name {
+            pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+                self.0.notify::<N>(params).await
+            }
+
+            pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
+                self.0.request::<R>(params).await
+            }
+
+            pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
+                self.0.emit::<E>(event).await
+            }
+        }
+    };
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientSocket(RemoteSocket);
+impl_socket_wrapper!(ClientSocket);
 
-impl ClientSocket {
-    pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
-        self.0.notify::<N>(params).await
-    }
-
-    pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
-        self.0.request::<R>(params).await
-    }
-
-    pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
-        self.0.emit::<E>(event).await
-    }
-}
+#[derive(Debug, Clone)]
+pub struct ServerSocket(RemoteSocket);
+impl_socket_wrapper!(ServerSocket);
 
 #[derive(Debug, Clone)]
 struct RemoteSocket {
