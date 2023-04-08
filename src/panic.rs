@@ -21,10 +21,12 @@ pub struct CatchUnwind<S> {
 type Handler = fn(&str, Box<dyn Any + Send>) -> ResponseError;
 
 impl<S> CatchUnwind<S> {
+    #[must_use]
     pub fn new(service: S) -> Self {
         Self::new_with_handler(service, default_handler)
     }
 
+    #[must_use]
     pub fn new_with_handler(service: S, handler: Handler) -> Self {
         Self { service, handler }
     }
@@ -127,6 +129,7 @@ impl<S: LspService> LspService for CatchUnwind<S> {
     }
 }
 
+#[must_use]
 pub struct CatchUnwindLayer {
     handler: Handler,
 }

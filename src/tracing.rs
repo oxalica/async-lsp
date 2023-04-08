@@ -65,6 +65,7 @@ impl<S: LspService> LspService for Tracing<S> {
 }
 
 #[derive(Clone)]
+#[must_use]
 pub struct TracingBuilder {
     service_ready: Option<fn() -> Span>,
     request: Option<fn(&AnyRequest) -> Span>,

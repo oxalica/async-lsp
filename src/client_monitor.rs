@@ -19,6 +19,7 @@ pub struct ClientProcessMonitor<S> {
 }
 
 impl<S> ClientProcessMonitor<S> {
+    #[must_use]
     pub fn new(service: S, client: ClientSocket) -> Self {
         Self { service, client }
     }
@@ -93,6 +94,7 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
     Ok(())
 }
 
+#[must_use]
 pub struct ClientProcessMonitorLayer {
     client: ClientSocket,
 }

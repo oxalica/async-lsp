@@ -99,6 +99,7 @@ impl<S: LspService> LspService for Concurrency<S> {
     }
 }
 
+#[must_use]
 pub struct ConcurrencyLayer {
     max_concurrency: usize,
 }

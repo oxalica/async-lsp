@@ -29,6 +29,7 @@ pub struct Lifecycle<S> {
 }
 
 impl<S> Lifecycle<S> {
+    #[must_use]
     pub fn new(service: S) -> Self {
         Self {
             service,
@@ -102,6 +103,7 @@ impl<S: LspService> LspService for Lifecycle<S> {
     }
 }
 
+#[must_use]
 pub struct LifecycleLayer;
 
 impl<S> Layer<S> for LifecycleLayer {

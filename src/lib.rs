@@ -257,6 +257,7 @@ enum MainLoopEvent {
 }
 
 impl<S: LspService> Frontend<S> {
+    #[must_use]
     pub fn new_server(
         channel_size: usize,
         builder: impl FnOnce(ClientSocket) -> S,
@@ -265,6 +266,7 @@ impl<S: LspService> Frontend<S> {
         (this, ClientSocket(socket))
     }
 
+    #[must_use]
     pub fn new_client(
         channel_size: usize,
         builder: impl FnOnce(ServerSocket) -> S,
@@ -465,15 +467,18 @@ impl fmt::Debug for AnyEvent {
 }
 
 impl AnyEvent {
+    #[must_use]
     fn new<T: Send + 'static>(v: T) -> Self {
         AnyEvent(Box::new(v), type_name::<T>())
     }
 
+    #[must_use]
     fn inner_type_id(&self) -> TypeId {
         // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
         Any::type_id(&*self.0)
     }
 
+    #[must_use]
     pub fn type_name(&self) -> &'static str {
         self.1
     }

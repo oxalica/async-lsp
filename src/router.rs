@@ -36,6 +36,7 @@ impl<S: Default> Default for Router<S> {
 }
 
 impl<S> Router<S> {
+    #[must_use]
     pub fn new(state: S) -> Self {
         Self {
             state,
