@@ -9,9 +9,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 
 [features]
-default = ["omni-trait", "stdio"]
+default = ["client-monitor", "omni-trait", "stdio"]
+client-monitor = ["rustix/process", "tokio/net"]
 omni-trait = []
-stdio = ["tokio/net"]
+stdio = ["rustix/fs", "tokio/net"]
 
 [dependencies]
 async-trait = "0.1.68"
@@ -19,17 +20,13 @@ either = "1.8.1"
 futures = { version = "0.3.28", default-features = false, features = ["async-await", "std"] }
 lsp-types = "0.94.0"
 pin-project-lite = "0.2.9"
+rustix = { version = "0.37.11", optional = true }
 serde = { version = "1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
 thiserror = "1.0.40"
 tokio = { version = "1.27.0", features = ["io-util", "rt", "sync"] }
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-async-pidfd = { version = "0.1.4", default-features = false }
-libc = "0.2.141"
-tokio = { version = "1.27.0", features = ["net"] }
 
 [dev-dependencies]
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "rt", "time"] }

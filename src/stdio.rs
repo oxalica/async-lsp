@@ -1,50 +1,48 @@
 use std::fs::File;
 use std::io::{self, Error, ErrorKind, IoSlice, Result, StdinLock, StdoutLock};
-use std::mem::ManuallyDrop;
-use std::os::fd::{AsRawFd, FromRawFd};
-use std::os::unix::prelude::FileTypeExt;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use rustix::fs::{fcntl_getfl, fcntl_setfl, fstat, FileType, OFlags};
+use rustix::io::{dup, stdin, stdout};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::unix::pipe;
 
 #[derive(Debug)]
-struct NonBlocking<T: AsRawFd> {
+struct NonBlocking<T: AsFd> {
     inner: T,
-    prev_flags: libc::c_int,
+    prev_flags: OFlags,
 }
 
-impl<T: AsRawFd> NonBlocking<T> {
-    unsafe fn new(inner: T) -> Result<Self> {
-        let fd = inner.as_raw_fd();
-        let ft = ManuallyDrop::new(File::from_raw_fd(fd))
-            .metadata()?
-            .file_type();
-        if !(ft.is_fifo() || ft.is_socket() || ft.is_char_device()) {
+impl<T: AsFd> NonBlocking<T> {
+    fn new(inner: T) -> Result<Self> {
+        let ft = FileType::from_raw_mode(fstat(&inner)?.st_mode);
+        if !matches!(
+            ft,
+            FileType::Fifo | FileType::Socket | FileType::CharacterDevice | FileType::BlockDevice
+        ) {
             return Err(Error::new(
                 ErrorKind::Other,
                 format!("File with mode {ft:?} is not pipe-like"),
             ));
         }
 
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 || libc::fcntl(inner.as_raw_fd(), libc::F_SETFL, flags | libc::O_NONBLOCK) != 0
-        {
-            return Err(Error::last_os_error());
-        }
-        Ok(Self {
-            inner,
-            prev_flags: flags,
-        })
+        let prev_flags = fcntl_getfl(&inner)?;
+        fcntl_setfl(&inner, prev_flags | OFlags::NONBLOCK)?;
+        Ok(Self { inner, prev_flags })
     }
 }
 
-impl<T: AsRawFd> Drop for NonBlocking<T> {
+impl<T: AsFd> Drop for NonBlocking<T> {
     fn drop(&mut self) {
-        unsafe {
-            let _ = libc::fcntl(self.inner.as_raw_fd(), libc::F_SETFL, self.prev_flags);
-        }
+        let _: std::result::Result<_, _> = fcntl_setfl(&self.inner, self.prev_flags);
+    }
+}
+
+impl<T: AsFd> AsFd for NonBlocking<T> {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
     }
 }
 
@@ -58,12 +56,11 @@ pub struct PipeStdin {
 
 impl PipeStdin {
     pub fn lock() -> Result<Self> {
-        let lock = unsafe { NonBlocking::new(io::stdin().lock())? };
+        let lock = NonBlocking::new(io::stdin().lock())?;
         // We must not close the stdin, but we have to pass an owned `File` into tokio.
         // Here we dup the file descripTOR to make it sound.
         // Note that the duplicate shares the same file descriptION.
-        let file =
-            unsafe { ManuallyDrop::new(File::from_raw_fd(lock.inner.as_raw_fd())).try_clone()? };
+        let file = File::from(dup(stdin())?);
         let inner = pipe::Receiver::from_file_unchecked(file)?;
         Ok(Self { inner, _lock: lock })
     }
@@ -89,10 +86,9 @@ pub struct PipeStdout {
 
 impl PipeStdout {
     pub fn lock() -> Result<Self> {
-        let lock = unsafe { NonBlocking::new(io::stdout().lock())? };
+        let lock = NonBlocking::new(io::stdout().lock())?;
         // See `PipeStdin::lock`.
-        let file =
-            unsafe { ManuallyDrop::new(File::from_raw_fd(lock.inner.as_raw_fd())).try_clone()? };
+        let file = File::from(dup(stdout())?);
         let inner = pipe::Sender::from_file_unchecked(file)?;
         Ok(Self { inner, _lock: lock })
     }

@@ -71,27 +71,26 @@ impl<S: LspService> LspService for ClientProcessMonitor<S> {
     }
 }
 
-#[cfg(target_os = "linux")]
 async fn wait_for_pid(pid: i32) -> io::Result<()> {
+    use rustix::io::Errno;
+    use rustix::process::{pidfd_open, Pid, PidfdFlags};
     use tokio::io::unix::{AsyncFd, AsyncFdReadyGuard};
 
-    let pidfd = match async_pidfd::PidFd::from_pid(pid) {
+    let pid = pid
+        .try_into()
+        .ok()
+        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
+    let pidfd = match pidfd_open(pid, PidfdFlags::NONBLOCK) {
         Ok(pidfd) => pidfd,
         // Already exited.
-        Err(err) if err.raw_os_error() == Some(libc::ESRCH) => return Ok(()),
-        Err(err) => return Err(err),
+        Err(Errno::SRCH) => return Ok(()),
+        Err(err) => return Err(err.into()),
     };
+
     let pidfd = AsyncFd::new(pidfd)?;
     let _guard: AsyncFdReadyGuard<'_, _> = pidfd.readable().await?;
     Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn wait_for_pid(_pid: i32) -> io::Result<()> {
-    Err(io::Error::new(
-        io::ErrorKind::Other,
-        "Monitoring arbitrary PID is not implemented on this platform",
-    ))
 }
 
 pub struct ClientProcessMonitorLayer {
