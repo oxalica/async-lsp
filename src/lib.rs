@@ -48,7 +48,7 @@ pub enum Error {
     #[error("deserialization failed: {0}")]
     Deserialize(#[from] serde_json::Error),
     #[error("{0}")]
-    Response(ResponseError),
+    Response(#[from] ResponseError),
     #[error("protocol error: {0}")]
     Protocol(String),
     #[error("{0}")]

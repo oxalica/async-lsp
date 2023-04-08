@@ -45,7 +45,7 @@ impl LanguageServer for ServerState {
     }
 
     fn hover(&mut self, _: HoverParams) -> BoxFuture<'static, Result<Option<Hover>, Self::Error>> {
-        let client = self.client.clone();
+        let mut client = self.client.clone();
         let counter = self.counter;
         Box::pin(async move {
             tokio::time::sleep(Duration::from_secs(1)).await;
