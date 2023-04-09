@@ -11,12 +11,12 @@ use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
 use std::ops::ControlFlow;
-use std::pin::{pin, Pin};
+use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
 use futures::stream::FuturesUnordered;
-use futures::{select_biased, FutureExt, StreamExt};
+use futures::{pin_mut, select_biased, FutureExt, StreamExt};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
@@ -298,11 +298,11 @@ impl<S: LspService> Frontend<S> {
     }
 
     pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
-        let input = pin!(input);
-        let mut input = pin!(futures::stream::unfold(input, |mut input| async move {
+        pin_mut!(input, output);
+        let input = futures::stream::unfold(input, |mut input| async move {
             Some((Message::read(&mut input).await, input))
-        }));
-        let mut output = pin!(output);
+        });
+        pin_mut!(input);
 
         loop {
             let ctl = select_biased! {

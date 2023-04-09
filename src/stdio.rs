@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{self, Error, ErrorKind, IoSlice, Result, StdinLock, StdoutLock};
-use std::os::fd::{AsFd, BorrowedFd};
+use std::os::unix::io::{AsFd, BorrowedFd};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
