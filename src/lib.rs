@@ -1,3 +1,12 @@
+//! Asynchronous [Language Server Protocol (LSP)][lsp] framework based on [tower].
+//!
+//! See project [README] for a general overview.
+//!
+//! [README]: https://github.com/oxalica/async-lsp#readme
+//! [lsp]: https://microsoft.github.io/language-server-protocol/overviews/lsp/overview/
+//! [tower]: https://github.com/tower-rs/tower
+//!
+//! TODO
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};

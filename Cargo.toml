@@ -2,7 +2,7 @@
 name = "async-lsp"
 version = "0.0.1"
 edition = "2021"
-description = "WIP: Asynchronous Language Server Protocol framework"
+description = "Asynchronous Language Server Protocol (LSP) framework based on tower"
 keywords = ["lsp", "language-server", "tower"]
 categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
