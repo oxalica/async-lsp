@@ -177,6 +177,7 @@ enum Message {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AnyRequest {
     pub id: RequestId,
     pub method: String,
@@ -186,6 +187,7 @@ pub struct AnyRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct AnyNotification {
     pub method: String,
     #[serde(default)]
@@ -194,6 +196,7 @@ pub struct AnyNotification {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 struct AnyResponse {
     id: RequestId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -203,11 +206,30 @@ struct AnyResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Error)]
+#[non_exhaustive]
 #[error("{message} ({code})")]
 pub struct ResponseError {
     pub code: ErrorCode,
     pub message: String,
     pub data: Option<JsonValue>,
+}
+
+impl ResponseError {
+    pub fn new(code: ErrorCode, message: impl fmt::Display) -> Self {
+        Self {
+            code,
+            message: message.to_string(),
+            data: None,
+        }
+    }
+
+    pub fn new_with_data(code: ErrorCode, message: impl fmt::Display, data: JsonValue) -> Self {
+        Self {
+            code,
+            message: message.to_string(),
+            data: Some(data),
+        }
+    }
 }
 
 impl Message {
