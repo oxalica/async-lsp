@@ -31,7 +31,7 @@ mod sealed {
         }
     }
 
-    impl NotifyResult for BoxFuture<'static, crate::Result<()>> {
+    impl NotifyResult for crate::Result<()> {
         fn fallback<N: Notification>() -> Self {
             unreachable!()
         }
@@ -141,7 +141,7 @@ macro_rules! define_server {
 
         impl LanguageServer for ServerSocket {
             type Error = crate::Error;
-            type NotifyResult = BoxFuture<'static, Result<(), Self::Error>>;
+            type NotifyResult = crate::Result<()>;
 
             // Requests.
 
@@ -177,16 +177,14 @@ macro_rules! define_server {
                 &mut self,
                 params: <notification::Initialized as Notification>::Params,
             ) -> Self::NotifyResult {
-                let socket = self.clone();
-                Box::pin(async move { socket.notify::<notification::Initialized>(params).await })
+                self.notify::<notification::Initialized>(params)
             }
 
             fn exit(
                 &mut self,
                 (): <notification::Exit as Notification>::Params,
             ) -> Self::NotifyResult {
-                let socket = self.clone();
-                Box::pin(async move { socket.notify::<notification::Exit>(()).await })
+                self.notify::<notification::Exit>(())
             }
 
             $(
@@ -194,8 +192,7 @@ macro_rules! define_server {
                 &mut self,
                 params: <$notif as Notification>::Params,
             ) -> Self::NotifyResult {
-                let socket = self.clone();
-                Box::pin(async move { socket.notify::<$notif>(params).await })
+                self.notify::<$notif>(params)
             }
             )*
         }
@@ -264,7 +261,7 @@ macro_rules! define_client {
 
         impl LanguageClient for ClientSocket {
             type Error = crate::Error;
-            type NotifyResult = BoxFuture<'static, Result<(), Self::Error>>;
+            type NotifyResult = crate::Result<()>;
 
             // Requests.
             $(
@@ -282,9 +279,8 @@ macro_rules! define_client {
             fn $notif_snake(
                 &mut self,
                 params: <$notif as Notification>::Params,
-            ) -> BoxFuture<'static, Result<(), Self::Error>> {
-                let socket = self.clone();
-                Box::pin(async move { socket.notify::<$notif>(params).await })
+            ) -> Self::NotifyResult {
+                self.notify::<$notif>(params)
             }
             )*
         }

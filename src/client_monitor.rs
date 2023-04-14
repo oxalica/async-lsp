@@ -48,7 +48,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
             tokio::spawn(async move {
                 if let Ok(()) = wait_for_pid(pid).await {
                     // Ignore channel close.
-                    let _: Result<_, _> = client.emit(ClientProcessExited).await;
+                    let _: Result<_, _> = client.emit(ClientProcessExited);
                 }
             });
         }

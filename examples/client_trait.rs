@@ -69,7 +69,7 @@ struct Stop;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let (indexed_tx, indexed_rx) = oneshot::channel();
-    let (frontend, mut server) = async_lsp::Frontend::new_client(1, |_server| {
+    let (frontend, mut server) = async_lsp::Frontend::new_client(|_server| {
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(CatchUnwindLayer::new())
@@ -118,7 +118,7 @@ async fn main() {
         .await
         .unwrap();
     info!("Initialized: {init_ret:?}");
-    server.initialized(InitializedParams {}).await.unwrap();
+    server.initialized(InitializedParams {}).unwrap();
 
     // Synchronize documents.
     let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
@@ -132,7 +132,6 @@ async fn main() {
                 text: text.into(),
             },
         })
-        .await
         .unwrap();
 
     // Wait until indexed.
@@ -154,8 +153,8 @@ async fn main() {
 
     // Shutdown.
     server.shutdown(()).await.unwrap();
-    server.exit(()).await.unwrap();
+    server.exit(()).unwrap();
 
-    server.emit(Stop).await.unwrap();
+    server.emit(Stop).unwrap();
     frontend_fut.await.unwrap();
 }

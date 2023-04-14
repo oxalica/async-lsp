@@ -275,7 +275,7 @@ impl Message {
 
 pub struct Frontend<S: LspService> {
     service: S,
-    rx: mpsc::Receiver<MainLoopEvent>,
+    rx: mpsc::UnboundedReceiver<MainLoopEvent>,
     outgoing_id: i32,
     outgoing: HashMap<RequestId, oneshot::Sender<AnyResponse>>,
     tasks: FuturesUnordered<RequestFuture<S::Future>>,
@@ -289,25 +289,19 @@ enum MainLoopEvent {
 
 impl<S: LspService> Frontend<S> {
     #[must_use]
-    pub fn new_server(
-        channel_size: usize,
-        builder: impl FnOnce(ClientSocket) -> S,
-    ) -> (Self, ClientSocket) {
-        let (this, socket) = Self::new(channel_size, |socket| builder(ClientSocket(socket)));
+    pub fn new_server(builder: impl FnOnce(ClientSocket) -> S) -> (Self, ClientSocket) {
+        let (this, socket) = Self::new(|socket| builder(ClientSocket(socket)));
         (this, ClientSocket(socket))
     }
 
     #[must_use]
-    pub fn new_client(
-        channel_size: usize,
-        builder: impl FnOnce(ServerSocket) -> S,
-    ) -> (Self, ServerSocket) {
-        let (this, socket) = Self::new(channel_size, |socket| builder(ServerSocket(socket)));
+    pub fn new_client(builder: impl FnOnce(ServerSocket) -> S) -> (Self, ServerSocket) {
+        let (this, socket) = Self::new(|socket| builder(ServerSocket(socket)));
         (this, ServerSocket(socket))
     }
 
-    fn new(channel_size: usize, builder: impl FnOnce(RemoteSocket) -> S) -> (Self, RemoteSocket) {
-        let (tx, rx) = mpsc::channel(channel_size);
+    fn new(builder: impl FnOnce(RemoteSocket) -> S) -> (Self, RemoteSocket) {
+        let (tx, rx) = mpsc::unbounded_channel();
         let socket = RemoteSocket { tx };
         let this = Self {
             service: builder(socket.clone()),
@@ -416,16 +410,16 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
 macro_rules! impl_socket_wrapper {
     ($name:ident) => {
         impl $name {
-            pub async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
-                self.0.notify::<N>(params).await
-            }
-
             pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
                 self.0.request::<R>(params).await
             }
 
-            pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
-                self.0.emit::<E>(event).await
+            pub fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+                self.0.notify::<N>(params)
+            }
+
+            pub fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
+                self.0.emit::<E>(event)
             }
         }
     };
@@ -441,25 +435,12 @@ impl_socket_wrapper!(ServerSocket);
 
 #[derive(Debug, Clone)]
 struct RemoteSocket {
-    tx: mpsc::Sender<MainLoopEvent>,
+    tx: mpsc::UnboundedSender<MainLoopEvent>,
 }
 
 impl RemoteSocket {
-    async fn send(&self, v: MainLoopEvent) -> Result<()> {
-        self.tx.send(v).await.map_err(|_| Error::ServiceStopped)
-    }
-
-    async fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
-        let notif = AnyNotification {
-            method: N::METHOD.into(),
-            params: serde_json::to_value(params).expect("Failed to serialize"),
-        };
-        self.notify_any(notif).await
-    }
-
-    async fn notify_any(&self, notif: AnyNotification) -> Result<()> {
-        self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
-            .await
+    fn send(&self, v: MainLoopEvent) -> Result<()> {
+        self.tx.send(v).map_err(|_| Error::ServiceStopped)
     }
 
     async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
@@ -474,7 +455,7 @@ impl RemoteSocket {
 
     async fn request_any(&self, req: AnyRequest) -> Result<JsonValue> {
         let (tx, rx) = oneshot::channel();
-        self.send(MainLoopEvent::OutgoingRequest(req, tx)).await?;
+        self.send(MainLoopEvent::OutgoingRequest(req, tx))?;
         let resp = rx.await.map_err(|_| Error::ServiceStopped)?;
         match resp.error {
             None => Ok(resp.result.unwrap_or_default()),
@@ -482,8 +463,20 @@ impl RemoteSocket {
         }
     }
 
-    pub async fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
-        self.send(MainLoopEvent::Any(AnyEvent::new(event))).await
+    fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+        let notif = AnyNotification {
+            method: N::METHOD.into(),
+            params: serde_json::to_value(params).expect("Failed to serialize"),
+        };
+        self.notify_any(notif)
+    }
+
+    fn notify_any(&self, notif: AnyNotification) -> Result<()> {
+        self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
+    }
+
+    pub fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
+        self.send(MainLoopEvent::Any(AnyEvent::new(event)))
     }
 }
 

@@ -55,7 +55,6 @@ impl LanguageServer for ServerState {
                     typ: MessageType::INFO,
                     message: "Hello LSP".into(),
                 })
-                .await
                 .unwrap();
             Ok(Some(Hover {
                 contents: HoverContents::Scalar(MarkedString::String(format!(
@@ -99,16 +98,16 @@ impl ServerState {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let (server, _) = async_lsp::Frontend::new_server(1, |client| {
+    let (server, _) = async_lsp::Frontend::new_server(|client| {
         tokio::spawn({
             let client = client.clone();
             async move {
                 let mut interval = tokio::time::interval(Duration::from_secs(1));
                 loop {
                     interval.tick().await;
-                    if client.emit(TickEvent).await.is_err() {
+                    if client.emit(TickEvent).is_err() {
                         break;
-                    };
+                    }
                 }
             }
         });
