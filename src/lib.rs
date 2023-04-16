@@ -259,11 +259,15 @@ impl Message {
             content_len.ok_or_else(|| Error::Protocol("Missing content-length".into()))?;
         let mut buf = vec![0u8; content_len];
         reader.read_exact(&mut buf).await?;
+        #[cfg(feature = "tracing")]
+        ::tracing::trace!(msg = &*String::from_utf8_lossy(&buf), "incoming");
         Ok(serde_json::from_slice(&buf)?)
     }
 
     async fn write(&self, mut writer: impl AsyncWrite + Unpin) -> Result<()> {
         let buf = serde_json::to_string(self)?;
+        #[cfg(feature = "tracing")]
+        ::tracing::trace!(msg = buf, "outgoing");
         writer
             .write_all(format!("{}: {}\r\n\r\n", Self::CONTENT_LENGTH, buf.len()).as_bytes())
             .await?;
