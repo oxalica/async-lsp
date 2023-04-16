@@ -83,7 +83,10 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
 impl<S: LspService> LspService for Lifecycle<S> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         match &*notif.method {
-            notification::Exit::METHOD => ControlFlow::Break(Ok(())),
+            notification::Exit::METHOD => {
+                self.service.notify(notif)?;
+                ControlFlow::Break(Ok(()))
+            }
             notification::Initialized::METHOD => {
                 if self.state != State::Initializing {
                     return ControlFlow::Break(Err(Error::Protocol(format!(
@@ -92,6 +95,7 @@ impl<S: LspService> LspService for Lifecycle<S> {
                     ))));
                 }
                 self.state = State::Ready;
+                self.service.notify(notif)?;
                 ControlFlow::Continue(())
             }
             _ => self.service.notify(notif),
