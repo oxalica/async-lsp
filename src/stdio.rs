@@ -24,7 +24,7 @@ impl<T: AsFd> NonBlocking<T> {
         ) {
             return Err(Error::new(
                 ErrorKind::Other,
-                format!("File with mode {ft:?} is not pipe-like"),
+                format!("File type {ft:?} is not pipe-like"),
             ));
         }
 
@@ -37,12 +37,6 @@ impl<T: AsFd> NonBlocking<T> {
 impl<T: AsFd> Drop for NonBlocking<T> {
     fn drop(&mut self) {
         let _: std::result::Result<_, _> = fcntl_setfl(&self.inner, self.prev_flags);
-    }
-}
-
-impl<T: AsFd> AsFd for NonBlocking<T> {
-    fn as_fd(&self) -> BorrowedFd<'_> {
-        self.inner.as_fd()
     }
 }
 
@@ -63,6 +57,12 @@ impl PipeStdin {
         let file = File::from(dup(stdin())?);
         let inner = pipe::Receiver::from_file_unchecked(file)?;
         Ok(Self { inner, _lock: lock })
+    }
+}
+
+impl AsFd for PipeStdin {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
     }
 }
 
@@ -91,6 +91,12 @@ impl PipeStdout {
         let file = File::from(dup(stdout())?);
         let inner = pipe::Sender::from_file_unchecked(file)?;
         Ok(Self { inner, _lock: lock })
+    }
+}
+
+impl AsFd for PipeStdout {
+    fn as_fd(&self) -> BorrowedFd<'_> {
+        self.inner.as_fd()
     }
 }
 
