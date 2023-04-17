@@ -26,7 +26,7 @@ mod sealed {
             {
                 ControlFlow::Continue(())
             } else {
-                ControlFlow::Break(Err(crate::Error::Protocol(format!(
+                ControlFlow::Break(Err(crate::Error::Routing(format!(
                     "Unhandled notification: {}",
                     N::METHOD,
                 ))))

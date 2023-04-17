@@ -49,19 +49,31 @@ pub use omni_trait::{LanguageClient, LanguageServer};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Possible error types.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
+    /// The main loop is exited.
     #[error("service is stopped")]
     ServiceStopped,
+    /// The peer replies undecodable or invalid responses.
     #[error("deserialization failed: {0}")]
     Deserialize(#[from] serde_json::Error),
+    /// The peer replies an error response.
     #[error("{0}")]
     Response(#[from] ResponseError),
+    /// The peer violates the Language Server Protocol.
     #[error("protocol error: {0}")]
     Protocol(String),
+    /// Input/output errors from the underlying channels.
     #[error("{0}")]
     Io(#[from] io::Error),
+    /// No handlers for events or mandatory notifications (not starting with `$/`).
+    ///
+    /// Will not occur when catch-all handlers ([`router::Router::unhandled_event`] and
+    /// [`router::Router::unhandled_notification`]) are installed. #[error("{0}")]
+    #[error("{0}")]
+    Routing(String),
 }
 
 pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = ResponseError> {

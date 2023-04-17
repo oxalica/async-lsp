@@ -54,14 +54,14 @@ impl<S> Router<S> {
                 if notif.method.starts_with("$/") {
                     ControlFlow::Continue(())
                 } else {
-                    ControlFlow::Break(Err(Error::Protocol(format!(
+                    ControlFlow::Break(Err(Error::Routing(format!(
                         "Unhandled notification: {}",
                         notif.method,
                     ))))
                 }
             }),
             unhandled_event: Box::new(|_, event| {
-                ControlFlow::Break(Err(Error::Protocol(format!("Unhandled event: {event:?}"))))
+                ControlFlow::Break(Err(Error::Routing(format!("Unhandled event: {event:?}"))))
             }),
         }
     }
