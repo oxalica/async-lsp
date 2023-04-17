@@ -20,7 +20,10 @@ mod sealed {
 
     impl NotifyResult for ControlFlow<crate::Result<()>> {
         fn fallback<N: Notification>() -> Self {
-            if N::METHOD.starts_with("$/") || N::METHOD == "exit" || N::METHOD == "initialized" {
+            if N::METHOD.starts_with("$/")
+                || N::METHOD == notification::Exit::METHOD
+                || N::METHOD == notification::Initialized::METHOD
+            {
                 ControlFlow::Continue(())
             } else {
                 ControlFlow::Break(Err(crate::Error::Protocol(format!(
@@ -217,6 +220,7 @@ macro_rules! define_server {
                     let fut = state.$req_snake(params);
                     async move { fut.await.map_err(Into::into) }
                 });)*
+                this.notification::<notification::Initialized>(|state, params| state.initialized(params));
                 this.notification::<notification::Exit>(|state, params| state.exit(params));
                 $(this.notification::<$notif>(|state, params| state.$notif_snake(params));)*
                 this
