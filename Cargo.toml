@@ -9,8 +9,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 exclude = ["/generate_omni_trait.sh"]
 
-# Sync with CI. std::futures::poll_fn
-rust-version = "1.64"
+# Required features:
+# - std::future::poll_fn
+# - std::task::ready!
+rust-version = "1.64" # Sync with CI!
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
