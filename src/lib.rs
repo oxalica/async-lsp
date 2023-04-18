@@ -10,6 +10,7 @@
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
+use std::marker::PhantomData;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
@@ -21,6 +22,7 @@ use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
 use pin_project_lite::pin_project;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
@@ -459,23 +461,19 @@ impl PeerSocket {
         self.tx.send(v).map_err(|_| Error::ServiceStopped)
     }
 
-    async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
+    fn request<R: Request>(&self, params: R::Params) -> PeerSocketRequestFuture<R::Result> {
         let req = AnyRequest {
             id: RequestId::Number(0),
             method: R::METHOD.into(),
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
-        let ret = self.request_any(req).await?;
-        Ok(serde_json::from_value(ret)?)
-    }
-
-    async fn request_any(&self, req: AnyRequest) -> Result<JsonValue> {
         let (tx, rx) = oneshot::channel();
-        self.send(MainLoopEvent::OutgoingRequest(req, tx))?;
-        let resp = rx.await.map_err(|_| Error::ServiceStopped)?;
-        match resp.error {
-            None => Ok(resp.result.unwrap_or_default()),
-            Some(err) => Err(Error::Response(err)),
+        // If this fails, the oneshot channel will also be closed, and it is handled by
+        // `PeerSocketRequestFuture`.
+        let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(req, tx));
+        PeerSocketRequestFuture {
+            rx,
+            _marker: PhantomData,
         }
     }
 
@@ -484,15 +482,30 @@ impl PeerSocket {
             method: N::METHOD.into(),
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
-        self.notify_any(notif)
-    }
-
-    fn notify_any(&self, notif: AnyNotification) -> Result<()> {
         self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
     }
 
     pub fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
         self.send(MainLoopEvent::Any(AnyEvent::new(event)))
+    }
+}
+
+struct PeerSocketRequestFuture<T> {
+    rx: oneshot::Receiver<AnyResponse>,
+    _marker: PhantomData<fn() -> T>,
+}
+
+impl<T: DeserializeOwned> Future for PeerSocketRequestFuture<T> {
+    type Output = Result<T>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let resp = ready!(Pin::new(&mut self.rx)
+            .poll(cx)
+            .map_err(|_| Error::ServiceStopped))?;
+        Poll::Ready(match resp.error {
+            None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
+            Some(err) => Err(Error::Response(err)),
+        })
     }
 }
 

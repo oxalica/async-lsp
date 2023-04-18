@@ -152,16 +152,14 @@ macro_rules! define_server {
                 &mut self,
                 params: <request::Initialize as Request>::Params,
             ) -> ResponseFuture<request::Initialize, Self::Error> {
-                let socket = self.clone();
-                Box::pin(async move { socket.request::<request::Initialize>(params).await })
+                Box::pin(self.0.request::<request::Initialize>(params))
             }
 
             fn shutdown(
                 &mut self,
                 (): <request::Shutdown as Request>::Params,
             ) -> ResponseFuture<request::Shutdown, Self::Error> {
-                let socket = self.clone();
-                Box::pin(async move { socket.request::<request::Shutdown>(()).await })
+                Box::pin(self.0.request::<request::Shutdown>(()))
             }
 
             $(
@@ -169,8 +167,7 @@ macro_rules! define_server {
                 &mut self,
                 params: <$req as Request>::Params,
             ) -> ResponseFuture<$req, Self::Error> {
-                let socket = self.clone();
-                Box::pin(async move { socket.request::<$req>(params).await })
+                Box::pin(self.0.request::<$req>(params))
             }
             )*
 
@@ -273,8 +270,7 @@ macro_rules! define_client {
                 &mut self,
                 params: <$req as Request>::Params,
             ) -> ResponseFuture<$req, Self::Error> {
-                let socket = self.clone();
-                Box::pin(async move { socket.request::<$req>(params).await })
+                Box::pin(self.0.request::<$req>(params))
             }
             )*
 
