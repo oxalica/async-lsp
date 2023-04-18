@@ -316,9 +316,9 @@ impl<S: LspService> Frontend<S> {
         (this, ServerSocket(socket))
     }
 
-    fn new(builder: impl FnOnce(RemoteSocket) -> S) -> (Self, RemoteSocket) {
+    fn new(builder: impl FnOnce(PeerSocket) -> S) -> (Self, PeerSocket) {
         let (tx, rx) = mpsc::unbounded_channel();
-        let socket = RemoteSocket { tx };
+        let socket = PeerSocket { tx };
         let this = Self {
             service: builder(socket.clone()),
             rx,
@@ -442,19 +442,19 @@ macro_rules! impl_socket_wrapper {
 }
 
 #[derive(Debug, Clone)]
-pub struct ClientSocket(RemoteSocket);
+pub struct ClientSocket(PeerSocket);
 impl_socket_wrapper!(ClientSocket);
 
 #[derive(Debug, Clone)]
-pub struct ServerSocket(RemoteSocket);
+pub struct ServerSocket(PeerSocket);
 impl_socket_wrapper!(ServerSocket);
 
 #[derive(Debug, Clone)]
-struct RemoteSocket {
+struct PeerSocket {
     tx: mpsc::UnboundedSender<MainLoopEvent>,
 }
 
-impl RemoteSocket {
+impl PeerSocket {
     fn send(&self, v: MainLoopEvent) -> Result<()> {
         self.tx.send(v).map_err(|_| Error::ServiceStopped)
     }
