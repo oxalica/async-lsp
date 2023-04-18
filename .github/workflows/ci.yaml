@@ -23,11 +23,19 @@ jobs:
     name: Test ${{matrix.rust}} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v3
-      - uses: dtolnay/rust-toolchain@master
+      - name: Checkout
+        uses: actions/checkout@v3
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
-      - run: cargo test --workspace --all-targets
+      - name: Install cargo-hack
+        run: cargo install cargo-hack
+      # `cargo build` doesn't pull in [dev-dependencies].
+      - name: Build
+        run: cargo hack build --each-feature
+      - name: Test
+        run: cargo hack test --each-feature --all-targets
 
   clippy:
     name: Clippy
@@ -36,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@clippy
-      - run: cargo clippy --workspace --all-targets -- -Dclippy::all
+      - run: cargo clippy --all-targets --all-features -- -Dclippy::all
 
   outdated:
     name: Outdated
@@ -46,4 +54,4 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/install@cargo-outdated
-      - run: cargo outdated --workspace --exit-code 1
+      - run: cargo outdated --exit-code 1
