@@ -142,60 +142,67 @@ macro_rules! define_server {
             )*
         }
 
-        impl LanguageServer for ServerSocket {
-            type Error = crate::Error;
-            type NotifyResult = crate::Result<()>;
+        macro_rules! impl_server_socket {
+            ($ty:ty) => {
+                impl LanguageServer for $ty {
+                    type Error = crate::Error;
+                    type NotifyResult = crate::Result<()>;
 
-            // Requests.
+                    // Requests.
 
-            fn initialize(
-                &mut self,
-                params: <request::Initialize as Request>::Params,
-            ) -> ResponseFuture<request::Initialize, Self::Error> {
-                Box::pin(self.0.request::<request::Initialize>(params))
-            }
+                    fn initialize(
+                        &mut self,
+                        params: <request::Initialize as Request>::Params,
+                    ) -> ResponseFuture<request::Initialize, Self::Error> {
+                        Box::pin(self.0.request::<request::Initialize>(params))
+                    }
 
-            fn shutdown(
-                &mut self,
-                (): <request::Shutdown as Request>::Params,
-            ) -> ResponseFuture<request::Shutdown, Self::Error> {
-                Box::pin(self.0.request::<request::Shutdown>(()))
-            }
+                    fn shutdown(
+                        &mut self,
+                        (): <request::Shutdown as Request>::Params,
+                    ) -> ResponseFuture<request::Shutdown, Self::Error> {
+                        Box::pin(self.0.request::<request::Shutdown>(()))
+                    }
 
-            $(
-            fn $req_snake(
-                &mut self,
-                params: <$req as Request>::Params,
-            ) -> ResponseFuture<$req, Self::Error> {
-                Box::pin(self.0.request::<$req>(params))
-            }
-            )*
+                    $(
+                    fn $req_snake(
+                        &mut self,
+                        params: <$req as Request>::Params,
+                    ) -> ResponseFuture<$req, Self::Error> {
+                        Box::pin(self.0.request::<$req>(params))
+                    }
+                    )*
 
-            // Notifications.
+                    // Notifications.
 
-            fn initialized(
-                &mut self,
-                params: <notification::Initialized as Notification>::Params,
-            ) -> Self::NotifyResult {
-                self.notify::<notification::Initialized>(params)
-            }
+                    fn initialized(
+                        &mut self,
+                        params: <notification::Initialized as Notification>::Params,
+                    ) -> Self::NotifyResult {
+                        self.notify::<notification::Initialized>(params)
+                    }
 
-            fn exit(
-                &mut self,
-                (): <notification::Exit as Notification>::Params,
-            ) -> Self::NotifyResult {
-                self.notify::<notification::Exit>(())
-            }
+                    fn exit(
+                        &mut self,
+                        (): <notification::Exit as Notification>::Params,
+                    ) -> Self::NotifyResult {
+                        self.notify::<notification::Exit>(())
+                    }
 
-            $(
-            fn $notif_snake(
-                &mut self,
-                params: <$notif as Notification>::Params,
-            ) -> Self::NotifyResult {
-                self.notify::<$notif>(params)
-            }
-            )*
+                    $(
+                    fn $notif_snake(
+                        &mut self,
+                        params: <$notif as Notification>::Params,
+                    ) -> Self::NotifyResult {
+                        self.notify::<$notif>(params)
+                    }
+                    )*
+                }
+            };
         }
+
+        impl_server_socket!(ServerSocket);
+        impl_server_socket!(&'_ ServerSocket);
 
         impl<S> Router<S>
         where
@@ -260,30 +267,37 @@ macro_rules! define_client {
             )*
         }
 
-        impl LanguageClient for ClientSocket {
-            type Error = crate::Error;
-            type NotifyResult = crate::Result<()>;
+        macro_rules! impl_client_socket {
+            ($ty:ty) => {
+                impl LanguageClient for $ty {
+                    type Error = crate::Error;
+                    type NotifyResult = crate::Result<()>;
 
-            // Requests.
-            $(
-            fn $req_snake(
-                &mut self,
-                params: <$req as Request>::Params,
-            ) -> ResponseFuture<$req, Self::Error> {
-                Box::pin(self.0.request::<$req>(params))
-            }
-            )*
+                    // Requests.
+                    $(
+                    fn $req_snake(
+                        &mut self,
+                        params: <$req as Request>::Params,
+                    ) -> ResponseFuture<$req, Self::Error> {
+                        Box::pin(self.0.request::<$req>(params))
+                    }
+                    )*
 
-            // Notifications.
-            $(
-            fn $notif_snake(
-                &mut self,
-                params: <$notif as Notification>::Params,
-            ) -> Self::NotifyResult {
-                self.notify::<$notif>(params)
-            }
-            )*
+                    // Notifications.
+                    $(
+                    fn $notif_snake(
+                        &mut self,
+                        params: <$notif as Notification>::Params,
+                    ) -> Self::NotifyResult {
+                        self.notify::<$notif>(params)
+                    }
+                    )*
+                }
+            };
         }
+
+        impl_client_socket!(ClientSocket);
+        impl_client_socket!(&'_ ClientSocket);
 
         impl<S> Router<S>
         where
