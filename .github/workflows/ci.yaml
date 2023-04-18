@@ -14,13 +14,14 @@ env:
 
 jobs:
   test:
-    name: Rust ${{matrix.rust}}
-    runs-on: ubuntu-latest
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         rust: [nightly, beta, stable, "1.64"] # Sync with Cargo.toml.
-    timeout-minutes: 45
+        os: [ubuntu-latest, macos-latest]
+    name: Test ${{matrix.rust}} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v3
       - uses: dtolnay/rust-toolchain@master
