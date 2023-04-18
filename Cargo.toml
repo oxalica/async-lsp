@@ -16,10 +16,30 @@ rust-version = "1.64" # Sync with CI!
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
-client-monitor = ["rustix/process", "tokio/net"]
+client-monitor = ["rustix/process", "tokio/net", "tokio/time"] # `tokio/time` is used for non-Linux.
 omni-trait = []
 stdio = ["rustix/fs", "tokio/net"]
 tracing = ["dep:tracing"]
+
+[[example]]
+name = "stdio"
+required-features = ["stdio"]
+
+[[example]]
+name = "client_builder"
+required-features = ["omni-trait", "tracing"]
+
+[[example]]
+name = "client_trait"
+required-features = ["omni-trait", "tracing"]
+
+[[example]]
+name = "server_builder"
+required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
+
+[[example]]
+name = "server_trait"
+required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
 
 [dependencies]
 either = "1.8.1"
