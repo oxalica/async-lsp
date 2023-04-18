@@ -157,3 +157,73 @@ impl<S> Layer<S> for ClientProcessMonitorLayer {
         ClientProcessMonitor::new(inner, self.client.clone())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::process::Stdio;
+    use std::time::Duration;
+
+    use rustix::io::Errno;
+    use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
+
+    #[tokio::test]
+    async fn wait_for_pid() {
+        // Don't stuck when something goes wrong.
+        const FUSE_DURATION_SEC: u32 = 10;
+        const WAIT_DURATION: Duration = Duration::from_secs(1);
+        // NB. Should be less than the period of poll-impl of `wait_for_pid`.
+        const TOLERANCE: Duration = Duration::from_millis(200);
+
+        let mut sh = Command::new("sh")
+            .args([
+                "-c",
+                &format!(
+                    "
+                    sleep {FUSE_DURATION_SEC} &
+                    echo $!
+                    "
+                ),
+            ])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to run sh");
+        let nonchild_raw_pid = {
+            let mut buf = String::new();
+            BufReader::new(sh.stdout.as_mut().unwrap())
+                .read_line(&mut buf)
+                .await
+                .unwrap();
+            buf.trim().parse::<i32>().unwrap()
+        };
+        assert!(nonchild_raw_pid >= 2);
+
+        // Grandchildren should not be children.
+        #[allow(clippy::unnecessary_cast)] // Linux and macOS have different `RawPid` types.
+        let nonchild_pid = unsafe { Pid::from_raw(nonchild_raw_pid as RawPid).unwrap() };
+        assert_ne!(sh.id().unwrap(), nonchild_raw_pid as u32);
+        assert_eq!(
+            waitpid(Some(nonchild_pid), WaitOptions::NOHANG).unwrap_err(),
+            Errno::CHILD
+        );
+
+        let wait_task = tokio::spawn(super::wait_for_pid(nonchild_raw_pid));
+
+        // Wait for some time to make sure no unexpected returns.
+        tokio::time::sleep(WAIT_DURATION).await;
+        if wait_task.is_finished() {
+            panic!("Unexpected return {:?}", wait_task.await);
+        }
+
+        // Kill the grandchild, and it should return in time.
+        kill_process(nonchild_pid, Signal::Term).unwrap();
+        tokio::time::timeout(TOLERANCE, wait_task)
+            .await
+            .expect("Should returns in time")
+            .expect("Should not panic")
+            .expect("Should succeeds");
+    }
+}
