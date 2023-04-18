@@ -46,9 +46,15 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
         })() {
             let client = self.client.clone();
             tokio::spawn(async move {
-                if let Ok(()) = wait_for_pid(pid).await {
-                    // Ignore channel close.
-                    let _: Result<_, _> = client.emit(ClientProcessExited);
+                match wait_for_pid(pid).await {
+                    Ok(()) => {
+                        // Ignore channel close.
+                        let _: Result<_, _> = client.emit(ClientProcessExited);
+                    }
+                    Err(_err) => {
+                        #[cfg(feature = "tracing")]
+                        ::tracing::error!("Failed to monitor peer process ({pid}): {_err:#}");
+                    }
                 }
             });
         }
@@ -72,6 +78,7 @@ impl<S: LspService> LspService for ClientProcessMonitor<S> {
     }
 }
 
+#[cfg(target_os = "linux")]
 async fn wait_for_pid(pid: i32) -> io::Result<()> {
     use rustix::io::Errno;
     use rustix::process::{pidfd_open, Pid, PidfdFlags};
@@ -91,6 +98,44 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
 
     let pidfd = AsyncFd::new(pidfd)?;
     let _guard: AsyncFdReadyGuard<'_, _> = pidfd.readable().await?;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn wait_for_pid(pid: i32) -> io::Result<()> {
+    use std::time::Duration;
+
+    use rustix::io::Errno;
+
+    // Accuracy doesn't matter.
+    // This monitor is only to avoid process leakage when the peer goes wrong.
+    #[cfg(not(test))]
+    const POLL_PERIOD: Duration = Duration::from_secs(30);
+    // But it matters in tests.
+    #[cfg(test)]
+    const POLL_PERIOD: Duration = Duration::from_millis(100);
+
+    fn is_alive(pid: i32) -> io::Result<bool> {
+        // Wait for https://github.com/bytecodealliance/rustix/pull/608
+        if unsafe { libc::kill(pid, 0) } == 0 {
+            return Ok(true);
+        }
+        let err = io::Error::last_os_error();
+        if err.raw_os_error() == Some(Errno::SRCH.raw_os_error()) {
+            return Ok(false);
+        }
+        Err(err)
+    }
+
+    #[cfg(feature = "tracing")]
+    ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
+
+    let mut interval = tokio::time::interval(POLL_PERIOD);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    while {
+        interval.tick().await;
+        is_alive(pid)?
+    } {}
     Ok(())
 }
 

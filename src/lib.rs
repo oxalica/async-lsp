@@ -33,7 +33,7 @@ pub mod panic;
 pub mod router;
 pub mod server;
 
-#[cfg(all(feature = "client-monitor", target_os = "linux"))]
+#[cfg(feature = "client-monitor")]
 pub mod client_monitor;
 
 #[cfg(all(feature = "stdio", unix))]
