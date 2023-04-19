@@ -51,17 +51,17 @@ pub use omni_trait::{LanguageClient, LanguageServer};
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Possible error types.
+/// Possible errors.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
-    /// The main loop is exited.
-    #[error("service is stopped")]
+    /// The service main loop stopped.
+    #[error("service stopped")]
     ServiceStopped,
     /// The peer replies undecodable or invalid responses.
     #[error("deserialization failed: {0}")]
     Deserialize(#[from] serde_json::Error),
-    /// The peer replies an error response.
+    /// The peer replies an error.
     #[error("{0}")]
     Response(#[from] ResponseError),
     /// The peer violates the Language Server Protocol.
@@ -73,7 +73,7 @@ pub enum Error {
     /// No handlers for events or mandatory notifications (not starting with `$/`).
     ///
     /// Will not occur when catch-all handlers ([`router::Router::unhandled_event`] and
-    /// [`router::Router::unhandled_notification`]) are installed. #[error("{0}")]
+    /// [`router::Router::unhandled_notification`]) are installed.
     #[error("{0}")]
     Routing(String),
 }
@@ -84,6 +84,13 @@ pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = Response
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>>;
 }
 
+/// A JSON-RPC error code.
+///
+/// Codes defined and/or used by LSP are defined as associated constants, eg.
+/// [`ErrorCode::REQUEST_FAILED`].
+///
+/// See:
+/// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#errorCodes>
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Error,
 )]
@@ -166,7 +173,10 @@ impl ErrorCode {
     pub const LSP_RESERVED_ERROR_RANGE_END: Self = Self(-32800);
 }
 
-// Rejects `null`.
+/// The identifier of requests and responses.
+///
+/// Though `null` is technically a valid id for responses, we reject it since it hardly makes sense
+/// for valid communication.
 pub type RequestId = NumberOrString;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -190,6 +200,7 @@ enum Message {
     Notification(AnyNotification),
 }
 
+/// A dynamic runtime request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AnyRequest {
@@ -200,6 +211,7 @@ pub struct AnyRequest {
     pub params: serde_json::Value,
 }
 
+/// A dynamic runtime notification.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AnyNotification {
@@ -209,6 +221,7 @@ pub struct AnyNotification {
     pub params: JsonValue,
 }
 
+/// A dynamic runtime response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 struct AnyResponse {
@@ -219,16 +232,26 @@ struct AnyResponse {
     error: Option<ResponseError>,
 }
 
+/// The error object in case a request fails.
+///
+/// See:
+/// <https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#responseError>
 #[derive(Debug, Clone, Serialize, Deserialize, Error)]
 #[non_exhaustive]
 #[error("{message} ({code})")]
 pub struct ResponseError {
+    /// A number indicating the error type that occurred.
     pub code: ErrorCode,
+    /// A string providing a short description of the error.
     pub message: String,
+    /// A primitive or structured value that contains additional
+    /// information about the error. Can be omitted.
     pub data: Option<JsonValue>,
 }
 
 impl ResponseError {
+    /// Create a new error object with a JSON-RPC error code and a message.
+    #[must_use]
     pub fn new(code: ErrorCode, message: impl fmt::Display) -> Self {
         Self {
             code,
@@ -237,6 +260,8 @@ impl ResponseError {
         }
     }
 
+    /// Create a new error object with a JSON-RPC error code, a message, and any additional data.
+    #[must_use]
     pub fn new_with_data(code: ErrorCode, message: impl fmt::Display, data: JsonValue) -> Self {
         Self {
             code,
@@ -291,6 +316,7 @@ impl Message {
     }
 }
 
+/// Service main loop driver for either Language Servers or Language Clients.
 pub struct Frontend<S: LspService> {
     service: S,
     rx: mpsc::UnboundedReceiver<MainLoopEvent>,
@@ -306,12 +332,14 @@ enum MainLoopEvent {
 }
 
 impl<S: LspService> Frontend<S> {
+    /// Create a Language Server `Frontend`.
     #[must_use]
     pub fn new_server(builder: impl FnOnce(ClientSocket) -> S) -> (Self, ClientSocket) {
         let (this, socket) = Self::new(|socket| builder(ClientSocket(socket)));
         (this, ClientSocket(socket))
     }
 
+    /// Create a Language Client `Frontend`.
     #[must_use]
     pub fn new_client(builder: impl FnOnce(ServerSocket) -> S) -> (Self, ServerSocket) {
         let (this, socket) = Self::new(|socket| builder(ServerSocket(socket)));
@@ -331,6 +359,13 @@ impl<S: LspService> Frontend<S> {
         (this, socket)
     }
 
+    /// Drive the service main loop to provide the service.
+    ///
+    /// # Errors
+    /// - `Error::Io` when the underlying `input` or `output` raises an error.
+    /// - `Error::Deserialize` when the peer sends undecodable or invalid message.
+    /// - `Error::Protocol` when the peer violates Language Server Protocol.
+    /// - Other errors raised from service handlers.
     pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
         pin_mut!(input, output);
         let input = futures::stream::unfold(input, |mut input| async move {
@@ -428,14 +463,33 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
 macro_rules! impl_socket_wrapper {
     ($name:ident) => {
         impl $name {
+            /// Send a request to the peer and wait for its response.
+            ///
+            /// # Errors
+            /// - [`Error::ServiceStopped`] when the service main loop stopped.
+            /// - [`Error::Response`] when the peer replies an error.
             pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
                 self.0.request::<R>(params).await
             }
 
+            /// Send a notification to the peer and wait for its response.
+            ///
+            /// This is done asynchronously. An `Ok` result indicates the message is successfully
+            /// queued, but may not be sent to the peer yet.
+            ///
+            /// # Errors
+            /// - [`Error::ServiceStopped`] when the service main loop stopped.
             pub fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
                 self.0.notify::<N>(params)
             }
 
+            /// Emit an arbitrary loopback event object to the service handler.
+            ///
+            /// This is done asynchronously. An `Ok` result indicates the message is successfully
+            /// queued, but may not be processed yet.
+            ///
+            /// # Errors
+            /// - [`Error::ServiceStopped`] when the service main loop stopped.
             pub fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
                 self.0.emit::<E>(event)
             }
@@ -443,10 +497,12 @@ macro_rules! impl_socket_wrapper {
     };
 }
 
+/// The socket for Language Server to communicate with the Language Client peer.
 #[derive(Debug, Clone)]
 pub struct ClientSocket(PeerSocket);
 impl_socket_wrapper!(ClientSocket);
 
+/// The socket for Language Client to communicate with the Language Server peer.
 #[derive(Debug, Clone)]
 pub struct ServerSocket(PeerSocket);
 impl_socket_wrapper!(ServerSocket);
@@ -509,6 +565,10 @@ impl<T: DeserializeOwned> Future for PeerSocketRequestFuture<T> {
     }
 }
 
+/// A dynamic runtime event.
+///
+/// This is a wrapper of `Box<dyn Any + Send>`, but saves the underlying type name for better
+/// `Debug` impl.
 pub struct AnyEvent(Box<dyn Any + Send>, &'static str);
 
 impl fmt::Debug for AnyEvent {
@@ -531,11 +591,18 @@ impl AnyEvent {
         Any::type_id(&*self.0)
     }
 
+    /// Get the underlying type name for debugging purpose.
+    ///
+    /// The result string is only meant for debugging. It is not stable and cannot be trusted.
     #[must_use]
     pub fn type_name(&self) -> &'static str {
         self.1
     }
 
+    /// Attempt to downcast it to a concrete type.
+    ///
+    /// # Errors
+    /// Returns `self` if the type mismatches.
     pub fn downcast<T: Send + 'static>(self) -> Result<T, Self> {
         match self.0.downcast::<T>() {
             Ok(v) => Ok(*v),

@@ -1,3 +1,27 @@
+//! Utilities to deal with stdin/stdout communication channel for Language Servers.
+//!
+//! Typically Language Servers serves on stdin/stdout by default. But generally they cannot be read
+//! or written asynchronously usually, due to technical reasons.
+//! (Eg. [`tokio::io::stdin`](https://docs.rs/tokio/1.27.0/tokio/io/fn.stdin.html) delegates reads
+//! to blocking threads.)
+//!
+//! This mod defines [`PipeStdin`] and [`PipeStdout`] for only stdin/stdout with pipe-like
+//! backends, which actually supports asynchronous reads and writes. This currently means one of:
+//! - FIFO pipes. Eg. named pipes [mkfifo(3)] and unnamed pipes [pipe(2)].
+//! - Sockets. Eg. TCP connections and UNIX domain sockets [unix(7)].
+//! - Character devices. Eg. [tty(4)] or [pty(7)].
+//! - Block devices.
+//!
+//! [mkfifo(3)]: https://man7.org/linux/man-pages/man3/mkfifo.3.html
+//! [pipe(2)]: https://man7.org/linux/man-pages/man2/pipe.2.html
+//! [unix(7)]: https://man7.org/linux/man-pages/man7/unix.7.html
+//! [tty(4)]: https://man7.org/linux/man-pages/man4/tty.4.html
+//! [pty(7)]: https://man7.org/linux/man-pages/man7/pty.7.html
+//!
+//! When calling [`PipeStdin::lock`], it locks the stdin using [`std::io::stdin`], set its mode to
+//! asynchronous, and exposes an `AsyncRead` interface for asynchronous reads. It keeps the lock
+//! guard internally, and reset the mode back when dropped, so that you can use [`println!`] as
+//! normal after that. [`PipeStdout::lock`] works in class.
 use std::fs::File;
 use std::io::{self, Error, ErrorKind, IoSlice, Result, StdinLock, StdoutLock};
 use std::os::unix::io::{AsFd, BorrowedFd};
@@ -40,6 +64,7 @@ impl<T: AsFd> Drop for NonBlocking<T> {
     }
 }
 
+/// Locked stdin for asynchronous read.
 #[derive(Debug)]
 pub struct PipeStdin {
     inner: pipe::Receiver,
@@ -49,6 +74,11 @@ pub struct PipeStdin {
 }
 
 impl PipeStdin {
+    /// Lock stdin with pipe-like backend and set it to asynchronous mode.
+    ///
+    /// # Errors
+    /// Fails if the underlying FD is not pipe-like, or error occurs when setting mode.
+    /// See [module level documentation](index.html) for more details.
     pub fn lock() -> Result<Self> {
         let lock = NonBlocking::new(io::stdin().lock())?;
         // We must not close the stdin, but we have to pass an owned `File` into tokio.
@@ -76,6 +106,7 @@ impl AsyncRead for PipeStdin {
     }
 }
 
+/// Locked stdout for asynchronous read.
 #[derive(Debug)]
 pub struct PipeStdout {
     inner: pipe::Sender,
@@ -85,6 +116,11 @@ pub struct PipeStdout {
 }
 
 impl PipeStdout {
+    /// Lock stdout with pipe-like backend and set it to asynchronous mode.
+    ///
+    /// # Errors
+    /// Fails if the underlying FD is not pipe-like, or error occurs when setting mode.
+    /// See [module level documentation](index.html) for more details.
     pub fn lock() -> Result<Self> {
         let lock = NonBlocking::new(io::stdout().lock())?;
         // See `PipeStdin::lock`.
