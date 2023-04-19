@@ -14,30 +14,30 @@ use crate::{
     Result,
 };
 
-pub struct Router<S> {
-    state: S,
-    req_handlers: HashMap<&'static str, BoxReqHandler<S>>,
-    notif_handlers: HashMap<&'static str, BoxNotifHandler<S>>,
-    event_handlers: HashMap<TypeId, BoxEventHandler<S>>,
-    unhandled_req: BoxReqHandler<S>,
-    unhandled_notif: BoxNotifHandler<S>,
-    unhandled_event: BoxEventHandler<S>,
+pub struct Router<St> {
+    state: St,
+    req_handlers: HashMap<&'static str, BoxReqHandler<St>>,
+    notif_handlers: HashMap<&'static str, BoxNotifHandler<St>>,
+    event_handlers: HashMap<TypeId, BoxEventHandler<St>>,
+    unhandled_req: BoxReqHandler<St>,
+    unhandled_notif: BoxNotifHandler<St>,
+    unhandled_event: BoxEventHandler<St>,
 }
 
 type BoxReqFuture = Pin<Box<dyn Future<Output = Result<JsonValue, ResponseError>> + Send>>;
-type BoxReqHandler<S> = Box<dyn Fn(&mut S, AnyRequest) -> BoxReqFuture + Send>;
-type BoxNotifHandler<S> = Box<dyn Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + Send>;
-type BoxEventHandler<S> = Box<dyn Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + Send>;
+type BoxReqHandler<St> = Box<dyn Fn(&mut St, AnyRequest) -> BoxReqFuture + Send>;
+type BoxNotifHandler<St> = Box<dyn Fn(&mut St, AnyNotification) -> ControlFlow<Result<()>> + Send>;
+type BoxEventHandler<St> = Box<dyn Fn(&mut St, AnyEvent) -> ControlFlow<Result<()>> + Send>;
 
-impl<S: Default> Default for Router<S> {
+impl<St: Default> Default for Router<St> {
     fn default() -> Self {
-        Self::new(S::default())
+        Self::new(St::default())
     }
 }
 
-impl<S> Router<S> {
+impl<St> Router<St> {
     #[must_use]
-    pub fn new(state: S) -> Self {
+    pub fn new(state: St) -> Self {
         Self {
             state,
             req_handlers: HashMap::new(),
@@ -68,7 +68,7 @@ impl<S> Router<S> {
 
     pub fn request<R: Request, Fut>(
         &mut self,
-        handler: impl Fn(&mut S, R::Params) -> Fut + Send + 'static,
+        handler: impl Fn(&mut St, R::Params) -> Fut + Send + 'static,
     ) -> &mut Self
     where
         Fut: Future<Output = Result<R::Result, ResponseError>> + Send + 'static,
@@ -96,7 +96,7 @@ impl<S> Router<S> {
 
     pub fn notification<N: Notification>(
         &mut self,
-        handler: impl Fn(&mut S, N::Params) -> ControlFlow<Result<()>> + Send + 'static,
+        handler: impl Fn(&mut St, N::Params) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.notif_handlers.insert(
             N::METHOD,
@@ -112,7 +112,7 @@ impl<S> Router<S> {
 
     pub fn event<E: Send + 'static>(
         &mut self,
-        handler: impl Fn(&mut S, E) -> ControlFlow<Result<()>> + Send + 'static,
+        handler: impl Fn(&mut St, E) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.event_handlers.insert(
             TypeId::of::<E>(),
@@ -126,7 +126,7 @@ impl<S> Router<S> {
 
     pub fn unhandled_request<Fut>(
         &mut self,
-        handler: impl Fn(&mut S, AnyRequest) -> Fut + Send + 'static,
+        handler: impl Fn(&mut St, AnyRequest) -> Fut + Send + 'static,
     ) -> &mut Self
     where
         Fut: Future<Output = Result<JsonValue, ResponseError>> + Send + 'static,
@@ -137,7 +137,7 @@ impl<S> Router<S> {
 
     pub fn unhandled_notification(
         &mut self,
-        handler: impl Fn(&mut S, AnyNotification) -> ControlFlow<Result<()>> + Send + 'static,
+        handler: impl Fn(&mut St, AnyNotification) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.unhandled_notif = Box::new(handler);
         self
@@ -145,14 +145,14 @@ impl<S> Router<S> {
 
     pub fn unhandled_event(
         &mut self,
-        handler: impl Fn(&mut S, AnyEvent) -> ControlFlow<Result<()>> + Send + 'static,
+        handler: impl Fn(&mut St, AnyEvent) -> ControlFlow<Result<()>> + Send + 'static,
     ) -> &mut Self {
         self.unhandled_event = Box::new(handler);
         self
     }
 }
 
-impl<S> Service<AnyRequest> for Router<S> {
+impl<St> Service<AnyRequest> for Router<St> {
     type Response = JsonValue;
     type Error = ResponseError;
     type Future = BoxReqFuture;
@@ -170,7 +170,7 @@ impl<S> Service<AnyRequest> for Router<S> {
     }
 }
 
-impl<S> LspService for Router<S> {
+impl<St> LspService for Router<St> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         let h = self
             .notif_handlers
@@ -192,7 +192,7 @@ impl<S> LspService for Router<S> {
 mod tests {
     use super::*;
 
-    fn _assert_send<S: Send>(router: Router<S>) -> impl Send {
+    fn _assert_send<St: Send>(router: Router<St>) -> impl Send {
         router
     }
 }
