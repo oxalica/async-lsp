@@ -10,7 +10,6 @@
 //! - FIFO pipes. Eg. named pipes [mkfifo(3)] and unnamed pipes [pipe(2)].
 //! - Sockets. Eg. TCP connections and UNIX domain sockets [unix(7)].
 //! - Character devices. Eg. [tty(4)] or [pty(7)].
-//! - Block devices.
 //!
 //! [mkfifo(3)]: https://man7.org/linux/man-pages/man3/mkfifo.3.html
 //! [pipe(2)]: https://man7.org/linux/man-pages/man2/pipe.2.html
@@ -44,7 +43,7 @@ impl<T: AsFd> NonBlocking<T> {
         let ft = FileType::from_raw_mode(fstat(&inner)?.st_mode);
         if !matches!(
             ft,
-            FileType::Fifo | FileType::Socket | FileType::CharacterDevice | FileType::BlockDevice
+            FileType::Fifo | FileType::Socket | FileType::CharacterDevice
         ) {
             return Err(Error::new(
                 ErrorKind::Other,
