@@ -22,17 +22,6 @@ pub struct Concurrency<S> {
     ongoing: HashMap<RequestId, oneshot::Sender<Infallible>>,
 }
 
-impl<S> Concurrency<S> {
-    pub fn new(service: S, max_concurrency: usize) -> Self {
-        assert_ne!(max_concurrency, 0);
-        Self {
-            service,
-            max_concurrency,
-            ongoing: HashMap::new(),
-        }
-    }
-}
-
 impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
     type Response = JsonValue;
     type Error = ResponseError;
@@ -99,21 +88,29 @@ impl<S: LspService> LspService for Concurrency<S> {
     }
 }
 
+#[derive(Clone, Debug)]
 #[must_use]
-pub struct ConcurrencyLayer {
+pub struct ConcurrencyBuilder {
     max_concurrency: usize,
 }
 
-impl ConcurrencyLayer {
+impl ConcurrencyBuilder {
     pub fn new(max_concurrency: usize) -> Self {
+        assert_ne!(max_concurrency, 0);
         Self { max_concurrency }
     }
 }
 
-impl<S> Layer<S> for ConcurrencyLayer {
+pub type ConcurrencyLayer = ConcurrencyBuilder;
+
+impl<S> Layer<S> for ConcurrencyBuilder {
     type Service = Concurrency<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        Concurrency::new(inner, self.max_concurrency)
+        Concurrency {
+            service: inner,
+            max_concurrency: self.max_concurrency,
+            ongoing: HashMap::with_capacity(self.max_concurrency),
+        }
     }
 }

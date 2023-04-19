@@ -18,13 +18,6 @@ pub struct ClientProcessMonitor<S> {
     client: ClientSocket,
 }
 
-impl<S> ClientProcessMonitor<S> {
-    #[must_use]
-    pub fn new(service: S, client: ClientSocket) -> Self {
-        Self { service, client }
-    }
-}
-
 impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
     type Response = JsonValue;
     type Error = ResponseError;
@@ -140,21 +133,26 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
 }
 
 #[must_use]
-pub struct ClientProcessMonitorLayer {
+pub struct ClientProcessMonitorBuilder {
     client: ClientSocket,
 }
 
-impl ClientProcessMonitorLayer {
+impl ClientProcessMonitorBuilder {
     pub fn new(client: ClientSocket) -> Self {
         Self { client }
     }
 }
 
-impl<S> Layer<S> for ClientProcessMonitorLayer {
+pub type ClientProcessMonitorLayer = ClientProcessMonitorBuilder;
+
+impl<S> Layer<S> for ClientProcessMonitorBuilder {
     type Service = ClientProcessMonitor<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        ClientProcessMonitor::new(inner, self.client.clone())
+        ClientProcessMonitor {
+            service: inner,
+            client: self.client.clone(),
+        }
     }
 }
 

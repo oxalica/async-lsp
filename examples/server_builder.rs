@@ -91,8 +91,8 @@ async fn main() {
 
         ServiceBuilder::new()
             .layer(TracingLayer::default())
-            .layer(LifecycleLayer)
-            .layer(CatchUnwindLayer::new())
+            .layer(LifecycleLayer::default())
+            .layer(CatchUnwindLayer::default())
             .layer(ConcurrencyLayer::new(4))
             .layer(ClientProcessMonitorLayer::new(client))
             .service(router)

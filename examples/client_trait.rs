@@ -72,7 +72,7 @@ async fn main() {
     let (frontend, mut server) = async_lsp::Frontend::new_client(|_server| {
         ServiceBuilder::new()
             .layer(TracingLayer::default())
-            .layer(CatchUnwindLayer::new())
+            .layer(CatchUnwindLayer::default())
             .layer(ConcurrencyLayer::new(4))
             .service(ClientState::new_router(indexed_tx))
     });

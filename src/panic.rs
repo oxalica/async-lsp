@@ -20,18 +20,6 @@ pub struct CatchUnwind<S> {
 
 type Handler = fn(&str, Box<dyn Any + Send>) -> ResponseError;
 
-impl<S> CatchUnwind<S> {
-    #[must_use]
-    pub fn new(service: S) -> Self {
-        Self::new_with_handler(service, default_handler)
-    }
-
-    #[must_use]
-    pub fn new_with_handler(service: S, handler: Handler) -> Self {
-        Self { service, handler }
-    }
-}
-
 fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError {
     let msg = match payload.downcast::<String>() {
         Ok(msg) => *msg,
@@ -129,31 +117,33 @@ impl<S: LspService> LspService for CatchUnwind<S> {
     }
 }
 
+#[derive(Clone)]
 #[must_use]
-pub struct CatchUnwindLayer {
+pub struct CatchUnwindBuilder {
     handler: Handler,
 }
 
-impl Default for CatchUnwindLayer {
+impl Default for CatchUnwindBuilder {
     fn default() -> Self {
-        Self::new()
+        Self::new_with_handler(default_handler)
     }
 }
 
-impl CatchUnwindLayer {
-    pub fn new() -> Self {
-        Self::new_with_handler(default_handler)
-    }
-
+impl CatchUnwindBuilder {
     pub fn new_with_handler(handler: Handler) -> Self {
         Self { handler }
     }
 }
 
-impl<S> Layer<S> for CatchUnwindLayer {
+pub type CatchUnwindLayer = CatchUnwindBuilder;
+
+impl<S> Layer<S> for CatchUnwindBuilder {
     type Service = CatchUnwind<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
-        CatchUnwind::new_with_handler(inner, self.handler)
+        CatchUnwind {
+            service: inner,
+            handler: self.handler,
+        }
     }
 }

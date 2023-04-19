@@ -108,7 +108,10 @@ impl<S: LspService> LspService for Lifecycle<S> {
 }
 
 #[must_use]
-pub struct LifecycleLayer;
+#[derive(Clone, Default)]
+pub struct LifecycleLayer {
+    _private: (),
+}
 
 impl<S> Layer<S> for LifecycleLayer {
     type Service = Lifecycle<S>;
