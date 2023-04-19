@@ -56,7 +56,7 @@ async fn main() {
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(CatchUnwindLayer::default())
-            .layer(ConcurrencyLayer::new(4))
+            .layer(ConcurrencyLayer::default())
             .service(router)
     });
 

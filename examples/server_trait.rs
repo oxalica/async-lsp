@@ -116,7 +116,7 @@ async fn main() {
             .layer(TracingLayer::default())
             .layer(LifecycleLayer::default())
             .layer(CatchUnwindLayer::default())
-            .layer(ConcurrencyLayer::new(4))
+            .layer(ConcurrencyLayer::default())
             .layer(ClientProcessMonitorLayer::new(client.clone()))
             .service(ServerState::new_router(client))
     });

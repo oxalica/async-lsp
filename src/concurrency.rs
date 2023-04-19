@@ -1,9 +1,11 @@
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
+use std::thread::available_parallelism;
 
 use lsp_types::notification::{self, Notification};
 use pin_project_lite::pin_project;
@@ -18,7 +20,7 @@ use crate::{
 
 pub struct Concurrency<S> {
     service: S,
-    max_concurrency: usize,
+    max_concurrency: NonZeroUsize,
     ongoing: HashMap<RequestId, oneshot::Sender<Infallible>>,
 }
 
@@ -29,7 +31,7 @@ impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.ongoing.retain(|_, tx| tx.poll_closed(cx).is_pending());
-        if self.ongoing.len() < self.max_concurrency {
+        if self.ongoing.len() < self.max_concurrency.get() {
             Poll::Ready(Ok(()))
         } else {
             Poll::Pending
@@ -37,7 +39,7 @@ impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        assert!(self.ongoing.len() <= self.max_concurrency);
+        assert!(self.ongoing.len() < self.max_concurrency.get(), "Not ready");
         let (cancel_tx, cancel_rx) = oneshot::channel();
         self.ongoing.insert(req.id.clone(), cancel_tx);
         let fut = self.service.call(req);
@@ -91,12 +93,17 @@ impl<S: LspService> LspService for Concurrency<S> {
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct ConcurrencyBuilder {
-    max_concurrency: usize,
+    max_concurrency: NonZeroUsize,
+}
+
+impl Default for ConcurrencyBuilder {
+    fn default() -> Self {
+        Self::new(available_parallelism().unwrap_or(NonZeroUsize::new(1).unwrap()))
+    }
 }
 
 impl ConcurrencyBuilder {
-    pub fn new(max_concurrency: usize) -> Self {
-        assert_ne!(max_concurrency, 0);
+    pub fn new(max_concurrency: NonZeroUsize) -> Self {
         Self { max_concurrency }
     }
 }
@@ -110,7 +117,7 @@ impl<S> Layer<S> for ConcurrencyBuilder {
         Concurrency {
             service: inner,
             max_concurrency: self.max_concurrency,
-            ongoing: HashMap::with_capacity(self.max_concurrency),
+            ongoing: HashMap::with_capacity(self.max_concurrency.get()),
         }
     }
 }
