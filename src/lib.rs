@@ -186,6 +186,15 @@ struct RawMessage<T> {
     inner: T,
 }
 
+impl<T> RawMessage<T> {
+    fn new(inner: T) -> Self {
+        Self {
+            jsonrpc: RpcVersion::V2,
+            inner,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum RpcVersion {
     #[serde(rename = "2.0")]
@@ -300,11 +309,12 @@ impl Message {
         reader.read_exact(&mut buf).await?;
         #[cfg(feature = "tracing")]
         ::tracing::trace!(msg = %String::from_utf8_lossy(&buf), "incoming");
-        Ok(serde_json::from_slice(&buf)?)
+        let msg = serde_json::from_slice::<RawMessage<Self>>(&buf)?;
+        Ok(msg.inner)
     }
 
     async fn write(&self, mut writer: impl AsyncWrite + Unpin) -> Result<()> {
-        let buf = serde_json::to_string(self)?;
+        let buf = serde_json::to_string(&RawMessage::new(self))?;
         #[cfg(feature = "tracing")]
         ::tracing::trace!(msg = %buf, "outgoing");
         writer
