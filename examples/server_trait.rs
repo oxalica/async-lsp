@@ -15,7 +15,6 @@ use lsp_types::{
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
-use tokio::io::BufReader;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 
@@ -127,7 +126,7 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let stdin = BufReader::new(PipeStdin::lock().unwrap());
+    let stdin = PipeStdin::lock().unwrap();
     let stdout = PipeStdout::lock().unwrap();
     server.run(stdin, stdout).await.unwrap();
 }
