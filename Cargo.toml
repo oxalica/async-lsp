@@ -62,6 +62,5 @@ libc = "0.2.141"
 [dev-dependencies]
 async-process = "1.7.0"
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "process", "rt", "time"] }
-tokio-util = { version = "0.7.8", features = ["compat"] }
 tower = "0.4.13"
 tracing-subscriber = "0.3.16"
