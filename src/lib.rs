@@ -16,11 +16,10 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
-use futures::io::BufReader;
 use futures::stream::FuturesUnordered;
 use futures::{
-    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite,
-    AsyncWriteExt, FutureExt, StreamExt,
+    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+    FutureExt, StreamExt,
 };
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
@@ -379,8 +378,7 @@ impl<S: LspService> Frontend<S> {
     /// - `Error::Deserialize` when the peer sends undecodable or invalid message.
     /// - `Error::Protocol` when the peer violates Language Server Protocol.
     /// - Other errors raised from service handlers.
-    pub async fn run(mut self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
-        let input = BufReader::new(input);
+    pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
         pin_mut!(input, output);
         let input = futures::stream::unfold(input, |mut input| async move {
             Some((Message::read(&mut input).await, input))

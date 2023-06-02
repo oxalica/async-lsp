@@ -9,6 +9,7 @@ use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
 use async_lsp::ClientSocket;
+use futures::io::BufReader;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
@@ -103,7 +104,7 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let stdin = PipeStdin::lock().unwrap();
+    let stdin = BufReader::new(PipeStdin::lock().unwrap());
     let stdout = PipeStdout::lock().unwrap();
     server.run(stdin, stdout).await.unwrap();
 }

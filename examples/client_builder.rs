@@ -14,6 +14,7 @@ use lsp_types::{
     TextDocumentItem, TextDocumentPositionParams, Url, WindowClientCapabilities, WorkDoneProgress,
     WorkDoneProgressParams,
 };
+use tokio::io::BufReader;
 use tokio::sync::oneshot;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tower::ServiceBuilder;
@@ -73,7 +74,7 @@ async fn main() {
         .kill_on_drop(true)
         .spawn()
         .expect("Failed run rust-analyzer");
-    let stdout = TokioAsyncReadCompatExt::compat(child.stdout.unwrap());
+    let stdout = TokioAsyncReadCompatExt::compat(BufReader::new(child.stdout.unwrap()));
     let stdin = TokioAsyncWriteCompatExt::compat_write(child.stdin.unwrap());
 
     let frontend_fut = tokio::spawn(async move {
