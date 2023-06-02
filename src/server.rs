@@ -1,3 +1,13 @@
+//! Language Server lifecycle.
+//!
+//! *Only applies to Language Servers.*
+//!
+//! This middleware handles
+//! [the lifecycle of Language Servers](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#lifeCycleMessages),
+//! specifically:
+//! - Exit the main loop with `ControlFlow::Break(Ok(()))` on `exit` notification.
+//! - Responds unrelated requests with errors and ignore unrelated notifications during
+//!   initialization and shutting down.
 use std::future::{ready, Future, Ready};
 use std::ops::ControlFlow;
 use std::task::{Context, Poll};
@@ -22,6 +32,9 @@ enum State {
     ShuttingDown,
 }
 
+/// The middleware handling Language Server lifecycle.
+///
+/// See [module level documentations](self) for details.
 #[derive(Debug, Default)]
 pub struct Lifecycle<S> {
     service: S,
@@ -29,6 +42,7 @@ pub struct Lifecycle<S> {
 }
 
 impl<S> Lifecycle<S> {
+    /// Creating the `Lifecycle` middleware in uninitialized state.
     #[must_use]
     pub fn new(service: S) -> Self {
         Self {
@@ -107,6 +121,7 @@ impl<S: LspService> LspService for Lifecycle<S> {
     }
 }
 
+/// A [`tower_layer::Layer`] which builds [`Lifecycle`].
 #[must_use]
 #[derive(Clone, Default)]
 pub struct LifecycleLayer {

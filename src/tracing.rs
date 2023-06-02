@@ -1,3 +1,14 @@
+//! Attach [`tracing::Span`]s over underlying handlers.
+//!
+//! *Applies to both Language Servers and Language Clients.*
+//!
+//! This middleware attaches spans to logs in underlying implementations, with optional method
+//! strings of current processing requests/notifications.
+//! All of these methods are instrumented by the [`Default`] configuration:
+//! - [`Service::poll_ready`].
+//! - [`Future::poll`] of returned `Future` from [`Service::call`].
+//! - [`LspService::notify`].
+//! - [`LspService::emit`].
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::pin::Pin;
@@ -10,6 +21,9 @@ use tracing::{info_span, Span};
 
 use crate::{AnyEvent, AnyNotification, AnyRequest, JsonValue, LspService, ResponseError, Result};
 
+/// The middleware attaching [`tracing::Span`]s over underlying handlers.
+///
+/// See [module level documentations](self) for details.
 #[derive(Default)]
 pub struct Tracing<S> {
     service: S,
@@ -35,6 +49,7 @@ impl<S: LspService> Service<AnyRequest> for Tracing<S> {
 }
 
 pin_project! {
+    /// The [`Future`] type used by the [`Tracing`] middleware.
     pub struct ResponseFuture<Fut> {
         span: Option<Span>,
         #[pin]
@@ -64,6 +79,9 @@ impl<S: LspService> LspService for Tracing<S> {
     }
 }
 
+/// The builder of [`Tracing`] middleware.
+///
+/// See [module level documentations](self) for details.
 #[derive(Clone)]
 #[must_use]
 pub struct TracingBuilder {
@@ -85,6 +103,10 @@ impl Default for TracingBuilder {
 }
 
 impl TracingBuilder {
+    /// Creating the builder with no spans configured.
+    ///
+    /// NB. This is **NOT** the same as [`TracingBuilder::default`] which configures ALL default
+    /// spans.
     pub fn new() -> Self {
         Self {
             service_ready: None,
@@ -94,26 +116,32 @@ impl TracingBuilder {
         }
     }
 
+    /// Set a [`tracing::Span`] builder to instrument [`Service::poll_ready`] method.
     pub fn service_ready(mut self, f: fn() -> Span) -> Self {
         self.service_ready = Some(f);
         self
     }
 
+    /// Set a [`tracing::Span`] builder to instrument [`Future::poll`] of the `Future` returned by
+    /// [`Service::call`].
     pub fn request(mut self, f: fn(&AnyRequest) -> Span) -> Self {
         self.request = Some(f);
         self
     }
 
+    /// Set a [`tracing::Span`] builder to instrument [`LspService::notify`].
     pub fn notification(mut self, f: fn(&AnyNotification) -> Span) -> Self {
         self.notification = Some(f);
         self
     }
 
+    /// Set a [`tracing::Span`] builder to instrument [`LspService::emit`].
     pub fn event(mut self, f: fn(&AnyEvent) -> Span) -> Self {
         self.event = Some(f);
         self
     }
 
+    /// Build the middleware with the current configuration.
     pub fn build<S>(&self, service: S) -> Tracing<S> {
         Tracing {
             service,
@@ -122,6 +150,7 @@ impl TracingBuilder {
     }
 }
 
+/// A type alias of [`TracingLayer`] conforming to the naming convention of [`tower_layer`].
 pub type TracingLayer = TracingBuilder;
 
 impl<S> Layer<S> for TracingBuilder {

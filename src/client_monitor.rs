@@ -1,3 +1,29 @@
+//! Stop the main loop when the Language Client process aborted unexpectedly.
+//!
+//! *Only applies to Language Servers.*
+//!
+//! Typically, the Language Client should send
+//! [`exit` notification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#exit)
+//! to inform the Language Server to exit. While in case of it unexpected aborted without the
+//! notification, and the communicate channel is left open somehow (eg. an FIFO or UNIX domain
+//! socket), the Language Server would wait indefinitely, wasting system resources.
+//!
+//! It is encouraged by
+//! [LSP specification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#initializeParams)
+//! that,
+//! > If the parent process (`processId`) is not alive then the server should exit (see exit
+//! > notification) its process.
+//!
+//! And this middleware does exactly this monitor mechanism.
+//!
+//! Implementation:
+//! - On Linux, it uses [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)
+//!   which is supported since Linux 5.3.
+//! - On other platforms, it perioidically calls
+//!   [`kill(2)`](https://man7.org/linux/man-pages/man2/kill.2.html) with zero `sig` to test the
+//!   validity of the PID, without actually sending signals. The checking period is currently 30s
+//!   but should not be relied on.
+//!
 use std::io;
 use std::ops::ControlFlow;
 use std::task::{Context, Poll};
@@ -13,6 +39,9 @@ use crate::{
 
 struct ClientProcessExited;
 
+/// The middleware stopping the main loop when the Language Client process aborted unexpectedly.
+///
+/// See [module level documentations](self) for details.
 pub struct ClientProcessMonitor<S> {
     service: S,
     client: ClientSocket,
@@ -135,17 +164,21 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
     Ok(())
 }
 
+/// The builder of [`ClientProcessMonitor`] middleware.
 #[must_use]
 pub struct ClientProcessMonitorBuilder {
     client: ClientSocket,
 }
 
 impl ClientProcessMonitorBuilder {
+    /// Create the middleware builder with a given [`ClientSocket`] to inject exit events.
     pub fn new(client: ClientSocket) -> Self {
         Self { client }
     }
 }
 
+/// A type alias of [`ClientProcessMonitorBuilder`] conforming to the naming convention of
+/// [`tower_layer`].
 pub type ClientProcessMonitorLayer = ClientProcessMonitorBuilder;
 
 impl<S> Layer<S> for ClientProcessMonitorBuilder {

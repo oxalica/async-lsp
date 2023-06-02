@@ -6,9 +6,6 @@
 
 Asynchronous [Language Server Protocol (LSP)][lsp] framework based on [tower].
 
-:warning: *This project serves as a proof-of-concept for LSP with middlewares
-and is in early development stage. It may not be production ready yet.*
-
 [docs]: https://docs.rs/async-lsp
 [lsp]: https://microsoft.github.io/language-server-protocol/overviews/lsp/overview/
 [tower]: https://github.com/tower-rs/tower
@@ -33,7 +30,7 @@ support.
 
 ## Usage
 
-See [documentations][docs] (TODO) and [examples](./examples).
+See [examples](./examples).
 
 ## Similar projects
 

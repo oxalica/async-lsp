@@ -1,3 +1,4 @@
+//! Dispatch requests and notifications to individual handlers.
 use std::any::TypeId;
 use std::collections::HashMap;
 use std::future::{ready, Future};
@@ -14,6 +15,7 @@ use crate::{
     Result,
 };
 
+/// A router dispatching requests and notifications to individual handlers.
 pub struct Router<St> {
     state: St,
     req_handlers: HashMap<&'static str, BoxReqHandler<St>>,
@@ -36,6 +38,7 @@ impl<St: Default> Default for Router<St> {
 }
 
 impl<St> Router<St> {
+    /// Create a empty `Router`.
     #[must_use]
     pub fn new(state: St) -> Self {
         Self {
@@ -66,6 +69,9 @@ impl<St> Router<St> {
         }
     }
 
+    /// Add an asynchronous request handler for a specific LSP request `R`.
+    ///
+    /// If handler for the method already exists, it replaces the old one.
     pub fn request<R: Request, Fut>(
         &mut self,
         handler: impl Fn(&mut St, R::Params) -> Fut + Send + 'static,
@@ -94,6 +100,9 @@ impl<St> Router<St> {
         self
     }
 
+    /// Add a synchronous request handler for a specific LSP notification `N`.
+    ///
+    /// If handler for the method already exists, it replaces the old one.
     pub fn notification<N: Notification>(
         &mut self,
         handler: impl Fn(&mut St, N::Params) -> ControlFlow<Result<()>> + Send + 'static,
@@ -110,6 +119,9 @@ impl<St> Router<St> {
         self
     }
 
+    /// Add a synchronous event handler for event type `E`.
+    ///
+    /// If handler for the method already exists, it replaces the old one.
     pub fn event<E: Send + 'static>(
         &mut self,
         handler: impl Fn(&mut St, E) -> ControlFlow<Result<()>> + Send + 'static,
@@ -124,6 +136,13 @@ impl<St> Router<St> {
         self
     }
 
+    /// Set an asynchronous catch-all request handler for any requests with no corresponding handler
+    /// for its `method`.
+    ///
+    /// There can only be a single catch-all request handler. New ones replace old ones.
+    ///
+    /// The default handler is to respond a error response with code
+    /// [`ErrorCode::METHOD_NOT_FOUND`].
     pub fn unhandled_request<Fut>(
         &mut self,
         handler: impl Fn(&mut St, AnyRequest) -> Fut + Send + 'static,
@@ -135,6 +154,15 @@ impl<St> Router<St> {
         self
     }
 
+    /// Set a synchronous catch-all notification handler for any notifications with no
+    /// corresponding handler for its `method`.
+    ///
+    /// There can only be a single catch-all notification handler. New ones replace old ones.
+    ///
+    /// The default handler is to do nothing for methods starting with `$/`, and break the main
+    /// loop with [`Error::Routing`] for other methods. Typically notifications are critical and
+    /// losing them can break state synchronization, easily leading to catastrophic failures after
+    /// incorrect incremental changes.
     pub fn unhandled_notification(
         &mut self,
         handler: impl Fn(&mut St, AnyNotification) -> ControlFlow<Result<()>> + Send + 'static,
@@ -143,6 +171,13 @@ impl<St> Router<St> {
         self
     }
 
+    /// Set a synchronous catch-all event handler for any notifications with no
+    /// corresponding handler for its type.
+    ///
+    /// There can only be a single catch-all event handler. New ones replace old ones.
+    ///
+    /// The default handler is to break the main loop with [`Error::Routing`]. Since events are
+    /// emitted internally, mishandling are typically logic errors.
     pub fn unhandled_event(
         &mut self,
         handler: impl Fn(&mut St, AnyEvent) -> ControlFlow<Result<()>> + Send + 'static,

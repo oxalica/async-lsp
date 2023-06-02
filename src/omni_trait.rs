@@ -80,8 +80,13 @@ macro_rules! define_server {
         { $($req_snake:ident, $req:ty;)* }
         { $($notif_snake:ident, $notif:ty;)* }
     ) => {
+        /// The omnitrait defining all standard LSP requests and notifications for a Language
+        /// Server.
+        #[allow(missing_docs)]
         pub trait LanguageServer {
+            /// Should always be defined to [`ResponseError`] for user implementations.
             type Error: From<ResponseError> + Send + 'static;
+            /// Should always be defined to `ControlFlow<Result<()>>` for user implementations.
             type NotifyResult: NotifyResult;
 
             // Requests.
@@ -209,6 +214,7 @@ macro_rules! define_server {
             S: LanguageServer<NotifyResult = ControlFlow<crate::Result<()>>>,
             ResponseError: From<S::Error>,
         {
+            /// Create a [`Router`] using its implementation of [`LanguageServer`] as handlers.
             #[must_use]
             pub fn from_language_server(state: S) -> Self {
                 let mut this = Self::new(state);
@@ -238,8 +244,13 @@ macro_rules! define_client {
         { $($req_snake:ident, $req:ty;)* }
         { $($notif_snake:ident, $notif:ty;)* }
     ) => {
+        /// The omnitrait defining all standard LSP requests and notifications for a Language
+        /// Client.
+        #[allow(missing_docs)]
         pub trait LanguageClient {
+            /// Should always be defined to [`ResponseError`] for user implementations.
             type Error: From<ResponseError> + Send + 'static;
+            /// Should always be defined to `ControlFlow<Result<()>>` for user implementations.
             type NotifyResult: NotifyResult;
 
             // Requests.
@@ -304,6 +315,7 @@ macro_rules! define_client {
             S: LanguageClient<NotifyResult = ControlFlow<crate::Result<()>>>,
             ResponseError: From<S::Error>,
         {
+            /// Create a [`Router`] using its implementation of [`LanguageClient`] as handlers.
             #[must_use]
             pub fn from_language_client(state: S) -> Self {
                 let mut this = Self::new(state);

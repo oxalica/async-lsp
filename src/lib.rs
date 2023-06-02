@@ -6,7 +6,44 @@
 //! [lsp]: https://microsoft.github.io/language-server-protocol/overviews/lsp/overview/
 //! [tower]: https://github.com/tower-rs/tower
 //!
-//! TODO
+//! This project is centered at a core service trait [`LspService`] for either Language Servers or
+//! Language Clients. The main loop driver [`Frontend`] execute the service. The additional
+//! features, called middleware, are pluggable can be layered using the [`tower_layer`]
+//! abstraction. This crate defines several common middlewares for various mandatory or optional
+//! LSP functionalities, see their documentations for details.
+//! - [`concurrency::Concurrency`]: Incoming request multiplexing and cancellation.
+//! - [`panic::CatchUnwind`]: Turn panics into errors.
+//! - [`tracing::Tracing`]: Logger spans with methods instrumenting handlers.
+//! - [`server::Lifecycle`]: Server initialization, shutting down, and exit handling.
+//! - [`client_monitor::ClientProcessMonitor`]: Client process monitor.
+//! - [`router::Router`]: "Root" service to dispatch requests, notifications and events.
+//!
+//! Users are free to select and layer middlewares to run a Language Server or Language Client.
+//! They can also implement their own middlewares for like timeout, metering, request
+//! transformation and etc.
+//!
+//! ## Usages
+//!
+//! There are two main ways to define a [`Router`](router::Router) root service: one is via its
+//! builder API, and the other is to construct via implementing the omnitrait [`LanguageServer`] or
+//! [`LanguageClient`] for a state struct. The former is more flexible, while the latter has a
+//! more similar API as [`tower-lsp`](https://crates.io/crates/tower-lsp).
+//!
+//! The examples for both builder-API and omnitrait, cross Language Server and Language Client, can
+//! be seen under
+#![doc = concat!("[`examples`](https://github.com/oxalica/async-lsp/tree/v", env!("CARGO_PKG_VERSION") , "/examples)")]
+//! directory.
+//!
+//! ## Cargo features
+//!
+//! - `client-monitor`: Client process monitor middleware [`client_monitor`]. This depends on [`tokio`].
+//! - `omni-trait`: Mega traits of all standard requests and notifications, namely
+//!   [`LanguageServer`] and [`LanguageClient`].
+//! - `stdio`: Utilities to deal with pipe-like stdin/stdout communication channel for Language
+//!   Servers. This depends on [`tokio`].
+//! - `tracing`: Intergration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
+//!
+//! All features are enabled by default.
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
@@ -49,6 +86,7 @@ mod omni_trait;
 #[cfg(feature = "omni-trait")]
 pub use omni_trait::{LanguageClient, LanguageServer};
 
+/// A convenient type alias for `Result` with `E` = [`enum@crate::Error`].
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Possible errors.
@@ -78,9 +116,27 @@ pub enum Error {
     Routing(String),
 }
 
+/// The core service abstraction, representing either a Language Server or Language Client.
 pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = ResponseError> {
+    /// The handler of [LSP notifications](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
+    ///
+    /// Notifications are delivered in order and synchronously. This is mandatory since they can
+    /// change the interpretation of later notifications or requests.
+    ///
+    /// # Return
+    ///
+    /// The return value decides the action to either break or continue the main loop.
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>>;
 
+    /// The handler of an arbitrary [`AnyEvent`].
+    ///
+    /// Events are emitted by users or middlewares via [`ClientSocket::emit`] or
+    /// [`ServerSocket::emit`], for user-defined purposes. Events are delivered in order and
+    /// synchronously.
+    ///
+    /// # Return
+    ///
+    /// The return value decides the action to either break or continue the main loop.
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>>;
 }
 
@@ -104,11 +160,30 @@ impl From<i32> for ErrorCode {
 }
 
 impl ErrorCode {
-    // Defined by JSON-RPC
+    /// Invalid JSON was received by the server. An error occurred on the server while parsing the
+    /// JSON text.
+    ///
+    /// Defined by [JSON-RPC](https://www.jsonrpc.org/specification#error_object).
     pub const PARSE_ERROR: Self = Self(-32700);
+
+    /// The JSON sent is not a valid Request object.
+    ///
+    /// Defined by [JSON-RPC](https://www.jsonrpc.org/specification#error_object).
     pub const INVALID_REQUEST: Self = Self(-32600);
+
+    /// The method does not exist / is not available.
+    ///
+    /// Defined by [JSON-RPC](https://www.jsonrpc.org/specification#error_object).
     pub const METHOD_NOT_FOUND: Self = Self(-32601);
+
+    /// Invalid method parameter(s).
+    ///
+    /// Defined by [JSON-RPC](https://www.jsonrpc.org/specification#error_object).
     pub const INVALID_PARAMS: Self = Self(-32602);
+
+    /// Internal JSON-RPC error.
+    ///
+    /// Defined by [JSON-RPC](https://www.jsonrpc.org/specification#error_object).
     pub const INTERNAL_ERROR: Self = Self(-32603);
 
     /// This is the start range of JSON-RPC reserved error codes.
@@ -123,6 +198,8 @@ impl ErrorCode {
     /// Error code indicating that a server received a notification or
     /// request before the server has received the `initialize` request.
     pub const SERVER_NOT_INITIALIZED: Self = Self(-32002);
+
+    /// (Defined by LSP specification without description)
     pub const UNKNOWN_ERROR_CODE: Self = Self(-32001);
 
     /// This is the end range of JSON-RPC reserved error codes.
@@ -209,22 +286,27 @@ enum Message {
     Notification(AnyNotification),
 }
 
-/// A dynamic runtime request.
+/// A dynamic runtime [LSP request](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AnyRequest {
+    /// The request id.
     pub id: RequestId,
+    /// The method to be invoked.
     pub method: String,
+    /// The method's params.
     #[serde(default)]
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     pub params: serde_json::Value,
 }
 
-/// A dynamic runtime notification.
+/// A dynamic runtime [LSP notification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct AnyNotification {
+    /// The method to be invoked.
     pub method: String,
+    /// The notification's params.
     #[serde(default)]
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
     pub params: JsonValue,

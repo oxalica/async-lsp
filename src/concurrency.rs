@@ -1,3 +1,11 @@
+//! Incoming request multiplexing limits and cancellation.
+//!
+//! *Applies to both Language Servers and Language Clients.*
+//!
+//! Note that the [`Frontend`][crate::Frontend] main loop can poll multiple ongoing requests
+//! out-of-box, while this middleware is to provides these additional features:
+//! 1. Limit concurrent incoming requests to at most `max_concurrency`.
+//! 2. Cancellation of incoming requests via client notification `$/cancelRequest`.
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
@@ -18,6 +26,9 @@ use crate::{
     ResponseError, Result,
 };
 
+/// The middleware for incoming request multiplexing limits and cancellation.
+///
+/// See [module level documentations](self) for details.
 pub struct Concurrency<S> {
     service: S,
     max_concurrency: NonZeroUsize,
@@ -48,6 +59,7 @@ impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
 }
 
 pin_project! {
+    /// The [`Future`] type used by the [`Concurrency`] middleware.
     pub struct ResponseFuture<Fut> {
         #[pin]
         fut: Fut,
@@ -90,6 +102,12 @@ impl<S: LspService> LspService for Concurrency<S> {
     }
 }
 
+/// The builder of [`Concurrency`] middleware.
+///
+/// It's [`Default`] configuration has `max_concurrency` of the result of
+/// [`std::thread::available_parallelism`], fallback to `1` if it fails.
+///
+/// See [module level documentations](self) for details.
 #[derive(Clone, Debug)]
 #[must_use]
 pub struct ConcurrencyBuilder {
@@ -103,11 +121,13 @@ impl Default for ConcurrencyBuilder {
 }
 
 impl ConcurrencyBuilder {
+    /// Create the middleware with concurrency limit `max_concurrency`.
     pub fn new(max_concurrency: NonZeroUsize) -> Self {
         Self { max_concurrency }
     }
 }
 
+/// A type alias of [`ConcurrencyBuilder`] conforming to the naming convention of [`tower_layer`].
 pub type ConcurrencyLayer = ConcurrencyBuilder;
 
 impl<S> Layer<S> for ConcurrencyBuilder {

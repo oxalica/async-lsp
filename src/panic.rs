@@ -1,3 +1,6 @@
+//! Catch panics of underlying handlers and turn them into error responses.
+//!
+//! *Applies to both Language Servers and Language Clients.*
 use std::any::Any;
 use std::future::Future;
 use std::ops::ControlFlow;
@@ -13,12 +16,15 @@ use crate::{
     AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
 };
 
+/// The middleware catching panics of underlying handlers and turn them into error responses.
+///
+/// See [module level documentations](self) for details.
 pub struct CatchUnwind<S> {
     service: S,
     handler: Handler,
 }
 
-type Handler = fn(&str, Box<dyn Any + Send>) -> ResponseError;
+type Handler = fn(method: &str, payload: Box<dyn Any + Send>) -> ResponseError;
 
 fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError {
     let msg = match payload.downcast::<String>() {
@@ -65,6 +71,7 @@ impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
 }
 
 pin_project! {
+    /// The [`Future`] type used by the [`CatchUnwind`] middleware.
     pub struct ResponseFuture<Fut> {
         #[pin]
         inner: ResponseFutureInner<Fut>,
@@ -117,6 +124,11 @@ impl<S: LspService> LspService for CatchUnwind<S> {
     }
 }
 
+/// The builder of [`CatchUnwind`] middleware.
+///
+/// It's [`Default`] configuration tries to downcast the panic payload into `String` or `&str`, and
+/// fallback to format it via [`std::fmt::Display`], as the error message.
+/// The error code is set to [`ErrorCode::INTERNAL_ERROR`].
 #[derive(Clone)]
 #[must_use]
 pub struct CatchUnwindBuilder {
@@ -130,11 +142,14 @@ impl Default for CatchUnwindBuilder {
 }
 
 impl CatchUnwindBuilder {
+    /// Create the builder of [`CatchUnwind`] middleware with a custom handler converting panic
+    /// payloads into [`ResponseError`].
     pub fn new_with_handler(handler: Handler) -> Self {
         Self { handler }
     }
 }
 
+/// A type alias of [`CatchUnwindBuilder`] conforming to the naming convention of [`tower_layer`].
 pub type CatchUnwindLayer = CatchUnwindBuilder;
 
 impl<S> Layer<S> for CatchUnwindBuilder {
