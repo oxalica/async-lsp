@@ -99,6 +99,7 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
     use std::time::Duration;
 
     use rustix::io::Errno;
+    use rustix::process::{test_kill_process, Pid};
 
     // Accuracy doesn't matter.
     // This monitor is only to avoid process leakage when the peer goes wrong.
@@ -108,20 +109,22 @@ async fn wait_for_pid(pid: i32) -> io::Result<()> {
     #[cfg(test)]
     const POLL_PERIOD: Duration = Duration::from_millis(100);
 
-    fn is_alive(pid: i32) -> io::Result<bool> {
-        // Wait for https://github.com/bytecodealliance/rustix/pull/608
-        if unsafe { libc::kill(pid, 0) } == 0 {
-            return Ok(true);
+    fn is_alive(pid: Pid) -> io::Result<bool> {
+        match test_kill_process(pid) {
+            Ok(()) => Ok(true),
+            Err(Errno::SRCH) => Ok(false),
+            Err(err) => Err(err.into()),
         }
-        let err = io::Error::last_os_error();
-        if err.raw_os_error() == Some(Errno::SRCH.raw_os_error()) {
-            return Ok(false);
-        }
-        Err(err)
     }
 
     #[cfg(feature = "tracing")]
     ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
+
+    let pid = pid
+        .try_into()
+        .ok()
+        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
 
     let mut interval = tokio::time::interval(POLL_PERIOD);
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
