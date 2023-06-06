@@ -41,6 +41,10 @@ required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
 name = "server_trait"
 required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
 
+[[test]]
+name = "unit_test"
+required-features = ["omni-trait"]
+
 [dependencies]
 either = "1.8.1"
 futures = { version = "0.3.28", default-features = false, features = ["async-await", "std"] }
