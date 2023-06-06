@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use async_lsp::stdio::{PipeStdin, PipeStdout};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use futures::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
 #[tokio::main(flavor = "current_thread")]

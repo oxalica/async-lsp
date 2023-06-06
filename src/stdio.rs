@@ -22,14 +22,14 @@
 //! guard internally, and reset the mode back when dropped, so that you can use [`println!`] as
 //! normal after that. [`PipeStdout::lock`] works in class.
 use std::fs::File;
-use std::io::{self, Error, ErrorKind, IoSlice, Result, StdinLock, StdoutLock};
+use std::io::{self, Error, ErrorKind, Result, StdinLock, StdoutLock};
 use std::os::unix::io::{AsFd, BorrowedFd};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::{AsyncRead, AsyncWrite};
 use rustix::fs::{fcntl_getfl, fcntl_setfl, fstat, FileType, OFlags};
 use rustix::io::{dup, stdin, stdout};
-use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::unix::pipe;
 
 #[derive(Debug)]
@@ -95,13 +95,19 @@ impl AsFd for PipeStdin {
     }
 }
 
+// Implementation based on the implementation in tokio_util::compat
 impl AsyncRead for PipeStdin {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>,
-    ) -> Poll<Result<()>> {
-        Pin::new(&mut self.inner).poll_read(cx, buf)
+        slice: &mut [u8],
+    ) -> Poll<Result<usize>> {
+        use tokio::io::{AsyncRead, ReadBuf};
+        let mut buf = ReadBuf::new(slice);
+        match Pin::new(&mut self.inner).poll_read(cx, &mut buf) {
+            Poll::Ready(_) => Poll::Ready(Ok(buf.filled().len())),
+            Poll::Pending => return Poll::Pending,
+        }
     }
 }
 
@@ -135,32 +141,24 @@ impl AsFd for PipeStdout {
     }
 }
 
+// Implementation based on the implementation in tokio_util::compat
 impl AsyncWrite for PipeStdout {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> Poll<Result<usize>> {
+    ) -> Poll<io::Result<usize>> {
+        use tokio::io::AsyncWrite;
         Pin::new(&mut self.inner).poll_write(cx, buf)
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        use tokio::io::AsyncWrite;
         Pin::new(&mut self.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<()>> {
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        use tokio::io::AsyncWrite;
         Pin::new(&mut self.inner).poll_shutdown(cx)
-    }
-
-    fn poll_write_vectored(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bufs: &[IoSlice<'_>],
-    ) -> Poll<Result<usize>> {
-        Pin::new(&mut self.inner).poll_write_vectored(cx, bufs)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        self.inner.is_write_vectored()
     }
 }

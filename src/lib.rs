@@ -54,7 +54,10 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
 use futures::stream::FuturesUnordered;
-use futures::{pin_mut, select_biased, FutureExt, StreamExt};
+use futures::{
+    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+    FutureExt, StreamExt,
+};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
@@ -63,7 +66,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::sync::{mpsc, oneshot};
 use tower_service::Service;
 

@@ -9,11 +9,11 @@ use async_lsp::server::LifecycleLayer;
 use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
 use async_lsp::ClientSocket;
+use futures::io::BufReader;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
-use tokio::io::BufReader;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 

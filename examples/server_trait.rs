@@ -10,12 +10,12 @@ use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
 use async_lsp::{ClientSocket, LanguageClient, LanguageServer, ResponseError};
 use futures::future::BoxFuture;
+use futures::io::BufReader;
 use lsp_types::{
     DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
-use tokio::io::BufReader;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 
