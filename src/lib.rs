@@ -561,6 +561,19 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
 macro_rules! impl_socket_wrapper {
     ($name:ident) => {
         impl $name {
+            /// Create a closed socket outside a main loop. Any interaction will immediately return
+            /// an error of [`Error::ServiceStopped`].
+            ///
+            /// This works as a placeholder where a socket is required but actually unused.
+            ///
+            /// # Note
+            ///
+            /// To prevent accidental misusages, this method is NOT implemented as
+            /// [`Default::default`] intentionally.
+            pub fn new_closed() -> Self {
+                Self(PeerSocket::new_closed())
+            }
+
             /// Send a request to the peer and wait for its response.
             ///
             /// # Errors
@@ -611,6 +624,11 @@ struct PeerSocket {
 }
 
 impl PeerSocket {
+    fn new_closed() -> Self {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        Self { tx }
+    }
+
     fn send(&self, v: MainLoopEvent) -> Result<()> {
         self.tx.send(v).map_err(|_| Error::ServiceStopped)
     }
@@ -706,5 +724,38 @@ impl AnyEvent {
             Ok(v) => Ok(*v),
             Err(b) => Err(Self(b, self.1)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn closed_client_socket() {
+        let socket = ClientSocket::new_closed();
+        assert!(matches!(
+            socket.notify::<lsp_types::notification::Exit>(()),
+            Err(Error::ServiceStopped)
+        ));
+        assert!(matches!(
+            socket.request::<lsp_types::request::Shutdown>(()).await,
+            Err(Error::ServiceStopped)
+        ));
+        assert!(matches!(socket.emit(42i32), Err(Error::ServiceStopped)));
+    }
+
+    #[tokio::test]
+    async fn closed_server_socket() {
+        let socket = ServerSocket::new_closed();
+        assert!(matches!(
+            socket.notify::<lsp_types::notification::Exit>(()),
+            Err(Error::ServiceStopped)
+        ));
+        assert!(matches!(
+            socket.request::<lsp_types::request::Shutdown>(()).await,
+            Err(Error::ServiceStopped)
+        ));
+        assert!(matches!(socket.emit(42i32), Err(Error::ServiceStopped)));
     }
 }
