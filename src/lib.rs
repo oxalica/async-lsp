@@ -108,6 +108,9 @@ pub enum Error {
     /// Input/output errors from the underlying channels.
     #[error("{0}")]
     Io(#[from] io::Error),
+    /// The underlying channel reached EOF (end of file).
+    #[error("the underlying channel reached EOF")]
+    Eof,
     /// No handlers for events or mandatory notifications (not starting with `$/`).
     ///
     /// Will not occur when catch-all handlers ([`router::Router::unhandled_event`] and
@@ -371,6 +374,9 @@ impl Message {
         loop {
             line.clear();
             reader.read_line(&mut line).await?;
+            if line.is_empty() {
+                return Err(Error::Eof);
+            }
             if line == "\r\n" {
                 break;
             }
