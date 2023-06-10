@@ -22,10 +22,6 @@ stdio = ["rustix/fs", "tokio/net"]
 tracing = ["dep:tracing"]
 
 [[example]]
-name = "stdio"
-required-features = ["stdio"]
-
-[[example]]
 name = "client_builder"
 required-features = ["omni-trait", "tracing"]
 
@@ -44,6 +40,11 @@ required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
 [[test]]
 name = "unit_test"
 required-features = ["omni-trait"]
+
+[[test]]
+name = "stdio"
+harness = false
+required-features = ["stdio"]
 
 [dependencies]
 either = "1.8.1"
