@@ -104,7 +104,7 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let stdin = BufReader::new(PipeStdin::lock().unwrap());
-    let stdout = PipeStdout::lock().unwrap();
+    let stdin = BufReader::new(PipeStdin::lock_tokio().unwrap());
+    let stdout = PipeStdout::lock_tokio().unwrap();
     server.run(stdin, stdout).await.unwrap();
 }

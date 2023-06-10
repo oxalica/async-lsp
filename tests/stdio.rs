@@ -51,8 +51,8 @@ fn parent() {
 }
 
 async fn child() {
-    let mut stdin = PipeStdin::lock().unwrap();
-    let mut stdout = PipeStdout::lock().unwrap();
+    let mut stdin = PipeStdin::lock_tokio().unwrap();
+    let mut stdout = PipeStdout::lock_tokio().unwrap();
     let mut buf = [0u8; 64];
 
     // Should be blocked since we are holding lock guards in `PipeStd{in,out}`.
