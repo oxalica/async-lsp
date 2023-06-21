@@ -73,7 +73,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                     #[cfg(target_os = "linux")]
                     use wait_for_pid_pidfd as wait_for_pid;
 
-                    #[cfg(all(not(target_os = "linux"), unix))]
+                    #[cfg(all(unix, not(target_os = "linux")))]
                     use wait_for_pid_kill as wait_for_pid;
 
                     match wait_for_pid(pid) {
@@ -87,6 +87,9 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                         }
                     }
                 });
+
+            // Unused without `tracing`.
+            #[allow(unused_variables)]
             if let Err(err) = ret {
                 #[cfg(feature = "tracing")]
                 ::tracing::error!("Failed to spawn client process monitor thread: {err:#}");
@@ -161,7 +164,7 @@ fn wait_for_pid_pidfd(pid: i32) -> io::Result<()> {
     Ok(())
 }
 
-#[cfg(any(test, not(target_os = "linux")))]
+#[cfg(all(unix, any(test, not(target_os = "linux"))))]
 fn wait_for_pid_kill(pid: i32) -> io::Result<()> {
     use std::time::Duration;
 
@@ -223,8 +226,8 @@ mod tests {
         // Don't stuck when something goes wrong.
         const FUSE_DURATION_SEC: u32 = 10;
         const WAIT_DURATION: Duration = Duration::from_secs(1);
-        // NB. Should be less than the period of poll-impl of `wait_for_pid`.
-        const TOLERANCE: Duration = Duration::from_millis(200);
+        // NB. Should be greater than `POLL_PERIOD`.
+        const TOLERANCE: Duration = Duration::from_millis(250);
 
         let mut sh = Command::new("sh")
             .args([
@@ -277,6 +280,7 @@ mod tests {
             .join()
             .expect("must not panic")
             .expect("must succeed");
-        assert!(inst.elapsed() < TOLERANCE);
+        let elapsed = inst.elapsed();
+        assert!(elapsed < TOLERANCE, "Wait for too long? {elapsed:?}");
     }
 }

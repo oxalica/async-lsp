@@ -16,7 +16,7 @@ rust-version = "1.64" # Sync with CI!
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
-client-monitor = ["rustix/process", "tokio/net", "tokio/time"] # `tokio/time` is used for non-Linux.
+client-monitor = ["rustix/process"]
 omni-trait = []
 stdio = ["rustix/fs", "tokio/net"]
 tracing = ["dep:tracing"]
