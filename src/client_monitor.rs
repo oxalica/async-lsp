@@ -76,6 +76,9 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                     #[cfg(all(unix, not(target_os = "linux")))]
                     use wait_for_pid_kill as wait_for_pid;
 
+                    #[cfg(windows)]
+                    use wait_for_pid_wfso as wait_for_pid;
+
                     match wait_for_pid(pid) {
                         Ok(()) => {
                             // Ignore channel close.
@@ -201,6 +204,28 @@ fn wait_for_pid_kill(pid: i32) -> io::Result<()> {
     Ok(())
 }
 
+#[cfg(windows)]
+fn wait_for_pid_wfso(pid: i32) -> io::Result<()> {
+    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
+    };
+
+    unsafe {
+        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid as _);
+        if process == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let ret = WaitForSingleObject(process, INFINITE);
+        CloseHandle(process);
+        if ret == WAIT_OBJECT_0 {
+            Ok(())
+        } else {
+            Err(io::Error::last_os_error())
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::{BufRead, BufReader};
@@ -208,8 +233,11 @@ mod tests {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    use rustix::io::Errno;
-    use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
+    // Don't stuck when something goes wrong.
+    const FUSE_DURATION_SEC: u32 = 10;
+    const WAIT_DURATION: Duration = Duration::from_secs(1);
+    // NB. Should be greater than `POLL_PERIOD`.
+    const TOLERANCE: Duration = Duration::from_millis(250);
 
     #[cfg(target_os = "linux")]
     #[test]
@@ -217,19 +245,18 @@ mod tests {
         run_test(super::wait_for_pid_pidfd);
     }
 
+    #[cfg(unix)]
     #[test]
     fn wait_for_pid_kill() {
         run_test(super::wait_for_pid_kill);
     }
 
+    #[cfg(unix)]
     fn run_test(wait_for_pid: fn(i32) -> std::io::Result<()>) {
-        // Don't stuck when something goes wrong.
-        const FUSE_DURATION_SEC: u32 = 10;
-        const WAIT_DURATION: Duration = Duration::from_secs(1);
-        // NB. Should be greater than `POLL_PERIOD`.
-        const TOLERANCE: Duration = Duration::from_millis(250);
+        use rustix::io::Errno;
+        use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
 
-        let mut sh = Command::new("sh")
+        let mut child = Command::new("sh")
             .args([
                 "-c",
                 &format!(
@@ -246,7 +273,7 @@ mod tests {
             .expect("Failed to run sh");
         let nonchild_raw_pid = {
             let mut buf = String::new();
-            BufReader::new(sh.stdout.as_mut().unwrap())
+            BufReader::new(child.stdout.as_mut().unwrap())
                 .read_line(&mut buf)
                 .unwrap();
             buf.trim().parse::<i32>().unwrap()
@@ -256,7 +283,7 @@ mod tests {
         // Grandchildren should not be children.
         #[allow(clippy::unnecessary_cast)] // Linux and macOS have different `RawPid` types.
         let nonchild_pid = unsafe { Pid::from_raw(nonchild_raw_pid as RawPid).unwrap() };
-        assert_ne!(sh.id(), nonchild_raw_pid as u32);
+        assert_ne!(child.id(), nonchild_raw_pid as u32);
         assert_eq!(
             waitpid(Some(nonchild_pid), WaitOptions::NOHANG).unwrap_err(),
             Errno::CHILD
@@ -275,6 +302,57 @@ mod tests {
 
         // Kill the grandchild, and it should return in time.
         kill_process(nonchild_pid, Signal::Term).unwrap();
+
+        let inst = Instant::now();
+        wait_task
+            .join()
+            .expect("must not panic")
+            .expect("must succeed");
+        let elapsed = inst.elapsed();
+        assert!(elapsed < TOLERANCE, "Wait for too long? {elapsed:?}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn wait_for_pid_wfso() {
+        let mut child = Command::new("powershell")
+            .args(["-Command", &format!(
+                "(Start-Process -PassThru -FilePath timeout -ArgumentList {FUSE_DURATION_SEC} -WindowStyle Hidden).Id"
+            )])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Failed to run powershell");
+        let nonchild_raw_pid = {
+            let mut buf = String::new();
+            BufReader::new(child.stdout.as_mut().unwrap())
+                .read_line(&mut buf)
+                .unwrap();
+            buf.trim().parse::<i32>().unwrap()
+        };
+
+        // Grandchildren should not be children.
+        assert_ne!(child.id(), nonchild_raw_pid as u32);
+
+        let wait_task = thread::spawn(move || super::wait_for_pid_wfso(nonchild_raw_pid));
+
+        // Wait for some time to make sure no unexpected returns.
+        thread::sleep(WAIT_DURATION);
+        if wait_task.is_finished() {
+            panic!(
+                "Returned while the process still alive: {:?}",
+                wait_task.join(),
+            );
+        }
+
+        // Kill the grandchild, and it should return in time.
+        assert!(Command::new("taskkill")
+            .args(["/f", "/pid", &nonchild_raw_pid.to_string()])
+            .status()
+            .unwrap()
+            .success());
+
         let inst = Instant::now();
         wait_task
             .join()
