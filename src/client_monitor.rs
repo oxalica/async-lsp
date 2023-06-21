@@ -67,18 +67,30 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                 .ok()
         })() {
             let client = self.client.clone();
-            tokio::spawn(async move {
-                match wait_for_pid(pid).await {
-                    Ok(()) => {
-                        // Ignore channel close.
-                        let _: Result<_, _> = client.emit(ClientProcessExited);
+            let ret = std::thread::Builder::new()
+                .name("client-process-monitor".into())
+                .spawn(move || {
+                    #[cfg(target_os = "linux")]
+                    use wait_for_pid_pidfd as wait_for_pid;
+
+                    #[cfg(all(not(target_os = "linux"), unix))]
+                    use wait_for_pid_kill as wait_for_pid;
+
+                    match wait_for_pid(pid) {
+                        Ok(()) => {
+                            // Ignore channel close.
+                            let _: Result<_, _> = client.emit(ClientProcessExited);
+                        }
+                        Err(_err) => {
+                            #[cfg(feature = "tracing")]
+                            ::tracing::error!("Failed to monitor peer process ({pid}): {_err:#}");
+                        }
                     }
-                    Err(_err) => {
-                        #[cfg(feature = "tracing")]
-                        ::tracing::error!("Failed to monitor peer process ({pid}): {_err:#}");
-                    }
-                }
-            });
+                });
+            if let Err(err) = ret {
+                #[cfg(feature = "tracing")]
+                ::tracing::error!("Failed to spawn client process monitor thread: {err:#}");
+            }
         }
 
         self.service.call(req)
@@ -98,70 +110,6 @@ impl<S: LspService> LspService for ClientProcessMonitor<S> {
             Err(event) => self.service.emit(event),
         }
     }
-}
-
-#[cfg(target_os = "linux")]
-async fn wait_for_pid(pid: i32) -> io::Result<()> {
-    use rustix::io::Errno;
-    use rustix::process::{pidfd_open, Pid, PidfdFlags};
-    use tokio::io::unix::{AsyncFd, AsyncFdReadyGuard};
-
-    let pid = pid
-        .try_into()
-        .ok()
-        .and_then(|pid| unsafe { Pid::from_raw(pid) })
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
-    let pidfd = match pidfd_open(pid, PidfdFlags::NONBLOCK) {
-        Ok(pidfd) => pidfd,
-        // Already exited.
-        Err(Errno::SRCH) => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-
-    let pidfd = AsyncFd::new(pidfd)?;
-    let _guard: AsyncFdReadyGuard<'_, _> = pidfd.readable().await?;
-    Ok(())
-}
-
-#[cfg(not(target_os = "linux"))]
-async fn wait_for_pid(pid: i32) -> io::Result<()> {
-    use std::time::Duration;
-
-    use rustix::io::Errno;
-    use rustix::process::{test_kill_process, Pid};
-
-    // Accuracy doesn't matter.
-    // This monitor is only to avoid process leakage when the peer goes wrong.
-    #[cfg(not(test))]
-    const POLL_PERIOD: Duration = Duration::from_secs(30);
-    // But it matters in tests.
-    #[cfg(test)]
-    const POLL_PERIOD: Duration = Duration::from_millis(100);
-
-    fn is_alive(pid: Pid) -> io::Result<bool> {
-        match test_kill_process(pid) {
-            Ok(()) => Ok(true),
-            Err(Errno::SRCH) => Ok(false),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    #[cfg(feature = "tracing")]
-    ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
-
-    let pid = pid
-        .try_into()
-        .ok()
-        .and_then(|pid| unsafe { Pid::from_raw(pid) })
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
-
-    let mut interval = tokio::time::interval(POLL_PERIOD);
-    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    while {
-        interval.tick().await;
-        is_alive(pid)?
-    } {}
-    Ok(())
 }
 
 /// The builder of [`ClientProcessMonitor`] middleware.
@@ -192,18 +140,86 @@ impl<S> Layer<S> for ClientProcessMonitorBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::process::Stdio;
+#[cfg(target_os = "linux")]
+fn wait_for_pid_pidfd(pid: i32) -> io::Result<()> {
+    use rustix::io::{poll, retry_on_intr, Errno, PollFd, PollFlags};
+    use rustix::process::{pidfd_open, Pid, PidfdFlags};
+
+    let pid = pid
+        .try_into()
+        .ok()
+        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
+    let pidfd = match pidfd_open(pid, PidfdFlags::empty()) {
+        Ok(pidfd) => pidfd,
+        // Already exited.
+        Err(Errno::SRCH) => return Ok(()),
+        Err(err) => return Err(err.into()),
+    };
+    let mut fds = [PollFd::new(&pidfd, PollFlags::IN)];
+    retry_on_intr(|| poll(&mut fds, -1 /* Infinite wait */))?;
+    Ok(())
+}
+
+#[cfg(any(test, not(target_os = "linux")))]
+fn wait_for_pid_kill(pid: i32) -> io::Result<()> {
     use std::time::Duration;
 
     use rustix::io::Errno;
-    use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
-    use tokio::io::{AsyncBufReadExt, BufReader};
-    use tokio::process::Command;
+    use rustix::process::{test_kill_process, Pid};
 
-    #[tokio::test]
-    async fn wait_for_pid() {
+    // Accuracy doesn't matter.
+    // This monitor is only to avoid process leakage when the peer goes wrong.
+    #[cfg(not(test))]
+    const POLL_PERIOD: Duration = Duration::from_secs(30);
+    // But it matters in tests.
+    #[cfg(test)]
+    const POLL_PERIOD: Duration = Duration::from_millis(100);
+
+    fn is_alive(pid: Pid) -> io::Result<bool> {
+        match test_kill_process(pid) {
+            Ok(()) => Ok(true),
+            Err(Errno::SRCH) => Ok(false),
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    #[cfg(feature = "tracing")]
+    ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
+
+    let pid = pid
+        .try_into()
+        .ok()
+        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
+    while is_alive(pid)? {
+        std::thread::sleep(POLL_PERIOD);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    use std::thread;
+    use std::time::{Duration, Instant};
+
+    use rustix::io::Errno;
+    use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn wait_for_pid_pidfd() {
+        run_test(super::wait_for_pid_pidfd);
+    }
+
+    #[test]
+    fn wait_for_pid_kill() {
+        run_test(super::wait_for_pid_kill);
+    }
+
+    fn run_test(wait_for_pid: fn(i32) -> std::io::Result<()>) {
         // Don't stuck when something goes wrong.
         const FUSE_DURATION_SEC: u32 = 10;
         const WAIT_DURATION: Duration = Duration::from_secs(1);
@@ -229,7 +245,6 @@ mod tests {
             let mut buf = String::new();
             BufReader::new(sh.stdout.as_mut().unwrap())
                 .read_line(&mut buf)
-                .await
                 .unwrap();
             buf.trim().parse::<i32>().unwrap()
         };
@@ -238,26 +253,30 @@ mod tests {
         // Grandchildren should not be children.
         #[allow(clippy::unnecessary_cast)] // Linux and macOS have different `RawPid` types.
         let nonchild_pid = unsafe { Pid::from_raw(nonchild_raw_pid as RawPid).unwrap() };
-        assert_ne!(sh.id().unwrap(), nonchild_raw_pid as u32);
+        assert_ne!(sh.id(), nonchild_raw_pid as u32);
         assert_eq!(
             waitpid(Some(nonchild_pid), WaitOptions::NOHANG).unwrap_err(),
             Errno::CHILD
         );
 
-        let wait_task = tokio::spawn(super::wait_for_pid(nonchild_raw_pid));
+        let wait_task = thread::spawn(move || wait_for_pid(nonchild_raw_pid));
 
         // Wait for some time to make sure no unexpected returns.
-        tokio::time::sleep(WAIT_DURATION).await;
+        thread::sleep(WAIT_DURATION);
         if wait_task.is_finished() {
-            panic!("Unexpected return {:?}", wait_task.await);
+            panic!(
+                "Returned while the process still alive: {:?}",
+                wait_task.join(),
+            );
         }
 
         // Kill the grandchild, and it should return in time.
         kill_process(nonchild_pid, Signal::Term).unwrap();
-        tokio::time::timeout(TOLERANCE, wait_task)
-            .await
-            .expect("Should returns in time")
-            .expect("Should not panic")
-            .expect("Should succeeds");
+        let inst = Instant::now();
+        wait_task
+            .join()
+            .expect("must not panic")
+            .expect("must succeed");
+        assert!(inst.elapsed() < TOLERANCE);
     }
 }
