@@ -35,7 +35,10 @@ impl LanguageClient for ClientState {
                 ProgressParamsValue::WorkDone(WorkDoneProgress::End(_))
             )
         {
-            let _: Result<_, _> = self.indexed_tx.take().unwrap().send(());
+            // Sometimes rust-analyzer auto-index multiple times?
+            if let Some(tx) = self.indexed_tx.take() {
+                let _: Result<_, _> = tx.send(());
+            }
         }
         ControlFlow::Continue(())
     }
@@ -157,4 +160,10 @@ async fn main() {
 
     server.emit(Stop).unwrap();
     frontend_fut.await.unwrap();
+}
+
+#[test]
+#[ignore = "invokes rust-analyzer"]
+fn rust_analyzer() {
+    main()
 }

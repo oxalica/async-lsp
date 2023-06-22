@@ -20,7 +20,7 @@ jobs:
       matrix:
         rust: [nightly, beta, stable, "1.64"] # Sync with Cargo.toml.
         os: [ubuntu-latest, macos-latest, windows-latest]
-    name: Test ${{matrix.rust}} on ${{ matrix.os }}
+    name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -29,13 +29,16 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ matrix.rust }}
+          components: rust-analyzer
       - name: Install cargo-hack
         run: cargo install cargo-hack
       # `cargo build` doesn't pull in [dev-dependencies].
       - name: Build
         run: cargo hack build --each-feature
+      - name: Doc test
+        run: cargo hack test --each-feature --doc
       - name: Test
-        run: cargo hack test --each-feature --all-targets
+        run: cargo hack test --each-feature --all-targets -- --include-ignored
 
   clippy:
     name: Clippy
