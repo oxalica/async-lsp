@@ -6,7 +6,6 @@ use async_lsp::concurrency::ConcurrencyLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
-use async_lsp::stdio::{PipeStdin, PipeStdout};
 use async_lsp::tracing::TracingLayer;
 use async_lsp::ClientSocket;
 use lsp_types::{
@@ -104,7 +103,16 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let stdin = BufReader::new(PipeStdin::lock_tokio().unwrap());
-    let stdout = PipeStdout::lock_tokio().unwrap();
+    // Prefer truely asynchronous piped stdin/stdout without blocking tasks.
+    #[cfg(unix)]
+    let (stdin, stdout) = (
+        async_lsp::stdio::PipeStdin::lock_tokio().unwrap(),
+        async_lsp::stdio::PipeStdout::lock_tokio().unwrap(),
+    );
+    // Fallback to spawn blocking read/write otherwise.
+    #[cfg(not(unix))]
+    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+
+    let stdin = BufReader::new(stdin);
     server.run(stdin, stdout).await.unwrap();
 }

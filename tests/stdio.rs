@@ -1,8 +1,8 @@
+#![cfg_attr(not(unix), allow(unused))]
 use std::io::{Read, Write};
 use std::process::Stdio;
 use std::time::Duration;
 
-use async_lsp::stdio::{PipeStdin, PipeStdout};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
@@ -11,6 +11,11 @@ const CHILD_ENV: &str = "IS_STDIO_TEST_CHILD";
 const READ_TIMEOUT: Duration = Duration::from_millis(500);
 const SCHED_TIMEOUT: Duration = Duration::from_millis(100);
 
+// Do nothing for non-UNIX targets: `stdio` module is not available.
+#[cfg(not(unix))]
+fn main() {}
+
+#[cfg(unix)]
 fn main() {
     if std::env::var(CHILD_ENV).is_err() {
         parent();
@@ -23,6 +28,7 @@ fn main() {
     }
 }
 
+#[cfg(unix)]
 fn parent() {
     let this_exe = std::env::current_exe().unwrap();
     let mut child = std::process::Command::new(this_exe)
@@ -50,7 +56,10 @@ fn parent() {
     assert_eq!(output.stdout, b"2");
 }
 
+#[cfg(unix)]
 async fn child() {
+    use async_lsp::stdio::{PipeStdin, PipeStdout};
+
     let mut stdin = PipeStdin::lock_tokio().unwrap();
     let mut stdout = PipeStdout::lock_tokio().unwrap();
     let mut buf = [0u8; 64];
