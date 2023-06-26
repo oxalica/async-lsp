@@ -54,7 +54,7 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
 use futures::stream::FuturesUnordered;
-use futures::{pin_mut, select_biased, FutureExt, StreamExt};
+use futures::{pin_mut, select_biased, FutureExt, SinkExt, StreamExt};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
@@ -466,30 +466,49 @@ impl<S: LspService> Frontend<S> {
     /// - Other errors raised from service handlers.
     pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
         pin_mut!(input, output);
-        let input = futures::stream::unfold(input, |mut input| async move {
+        let incoming = futures::stream::unfold(input, |mut input| async move {
             Some((Message::read(&mut input).await, input))
         });
-        pin_mut!(input);
+        let outgoing = futures::sink::unfold(output, |mut output, msg| async move {
+            Message::write(&msg, &mut output).await.map(|()| output)
+        });
+        pin_mut!(incoming, outgoing);
 
-        loop {
+        let mut flush_fut = futures::future::Fuse::terminated();
+        let ret = loop {
+            // Outgoing > internal > incoming.
+            // Preference on outgoing data provides back pressure in case of
+            // flooding incoming requests.
             let ctl = select_biased! {
-                msg = input.next() => self.dispatch_message(msg.expect("Never ends")?).await,
-                event = self.rx.recv().fuse() => self.dispatch_event(event.expect("Sender is alive")),
+                // Concurrently flush out the previous message.
+                ret = flush_fut => { ret?; continue; }
+
                 resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
+                event = self.rx.recv().fuse() => self.dispatch_event(event.expect("Sender is alive")),
+                msg = incoming.next() => self.dispatch_message(msg.expect("Never ends")?).await,
             };
             let msg = match ctl {
                 ControlFlow::Continue(Some(msg)) => msg,
                 ControlFlow::Continue(None) => continue,
-                ControlFlow::Break(ret) => return ret,
+                ControlFlow::Break(ret) => break ret,
             };
-            // TODO: Async write.
-            Message::write(&msg, &mut output).await?;
-        }
+            // Flush the previous one and load a new message to send.
+            outgoing.feed(msg).await?;
+            flush_fut = outgoing.flush().fuse();
+        };
+
+        // Flush the last message. It is enqueued before the event returning `ControlFlow::Break`.
+        // To preserve the order at best effort, we send it before exiting the main loop.
+        // But the more significant `ControlFlow::Break` error will override the flushing error,
+        // if there is any.
+        let flush_ret = outgoing.close().await;
+        ret.and(flush_ret)
     }
 
     async fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
         match msg {
             Message::Request(req) => {
+                // FIXME: This blocks main loop.
                 if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
                     let resp = AnyResponse {
                         id: req.id,
