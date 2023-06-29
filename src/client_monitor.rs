@@ -148,13 +148,11 @@ impl<S> Layer<S> for ClientProcessMonitorBuilder {
 
 #[cfg(target_os = "linux")]
 fn wait_for_pid_pidfd(pid: i32) -> io::Result<()> {
-    use rustix::io::{poll, retry_on_intr, Errno, PollFd, PollFlags};
+    use rustix::event::{poll, PollFd, PollFlags};
+    use rustix::io::{retry_on_intr, Errno};
     use rustix::process::{pidfd_open, Pid, PidfdFlags};
 
-    let pid = pid
-        .try_into()
-        .ok()
-        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+    let pid = Pid::from_raw(pid)
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
     let pidfd = match pidfd_open(pid, PidfdFlags::empty()) {
         Ok(pidfd) => pidfd,
@@ -193,10 +191,7 @@ fn wait_for_pid_kill(pid: i32) -> io::Result<()> {
     #[cfg(feature = "tracing")]
     ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
 
-    let pid = pid
-        .try_into()
-        .ok()
-        .and_then(|pid| unsafe { Pid::from_raw(pid) })
+    let pid = Pid::from_raw(pid)
         .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
     while is_alive(pid)? {
         std::thread::sleep(POLL_PERIOD);
@@ -254,7 +249,7 @@ mod tests {
     #[cfg(unix)]
     fn run_test(wait_for_pid: fn(i32) -> std::io::Result<()>) {
         use rustix::io::Errno;
-        use rustix::process::{kill_process, waitpid, Pid, RawPid, Signal, WaitOptions};
+        use rustix::process::{kill_process, waitpid, Pid, Signal, WaitOptions};
 
         let mut child = Command::new("sh")
             .args([
@@ -281,8 +276,7 @@ mod tests {
         assert!(nonchild_raw_pid >= 2);
 
         // Grandchildren should not be children.
-        #[allow(clippy::unnecessary_cast)] // Linux and macOS have different `RawPid` types.
-        let nonchild_pid = unsafe { Pid::from_raw(nonchild_raw_pid as RawPid).unwrap() };
+        let nonchild_pid = Pid::from_raw(nonchild_raw_pid).unwrap();
         assert_ne!(child.id(), nonchild_raw_pid as u32);
         assert_eq!(
             waitpid(Some(nonchild_pid), WaitOptions::NOHANG).unwrap_err(),
