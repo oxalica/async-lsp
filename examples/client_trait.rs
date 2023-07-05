@@ -7,6 +7,7 @@ use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::tracing::TracingLayer;
 use async_lsp::{LanguageClient, LanguageServer, ResponseError};
+use futures::channel::oneshot;
 use lsp_types::{
     ClientCapabilities, DidOpenTextDocumentParams, HoverParams, InitializeParams,
     InitializedParams, NumberOrString, Position, ProgressParams, ProgressParamsValue,
@@ -15,7 +16,6 @@ use lsp_types::{
     WorkDoneProgressParams,
 };
 use tokio::io::BufReader;
-use tokio::sync::oneshot;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 

@@ -5,13 +5,14 @@ use std::ops::ControlFlow;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::{ClientSocket, LanguageClient, LanguageServer};
+use futures::channel::mpsc;
+use futures::StreamExt;
 use lsp_types::{
     notification, request, ConfigurationItem, ConfigurationParams, Hover, HoverContents,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     MarkedString, MessageType, Position, ServerCapabilities, ShowMessageParams,
     TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
 };
-use tokio::sync::mpsc;
 use tower::ServiceBuilder;
 
 const MEMORY_CHANNEL_SIZE: usize = 64 << 10; // 64KiB
@@ -72,12 +73,12 @@ async fn mock_server_and_client() {
     });
 
     // The client with handlers.
-    let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+    let (msg_tx, mut msg_rx) = mpsc::unbounded();
     let (client_main, mut server) = async_lsp::Frontend::new_client(|_server| {
         let mut router = Router::new(ClientState { msg_tx });
         router
             .notification::<notification::ShowMessage>(|st, params| {
-                st.msg_tx.send(params.message).unwrap();
+                st.msg_tx.unbounded_send(params.message).unwrap();
                 ControlFlow::Continue(())
             })
             .request::<request::WorkspaceConfiguration, _>(|_st, _params| async move {
@@ -131,7 +132,7 @@ async fn mock_server_and_client() {
         })
         .unwrap();
     // Here the client may not get notification delivered yet. Wait for it.
-    assert_eq!(msg_rx.recv().await.unwrap(), "Some message");
+    assert_eq!(msg_rx.next().await.unwrap(), "Some message");
 
     // Shutdown the server.
     server.shutdown(()).await.unwrap();

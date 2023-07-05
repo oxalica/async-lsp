@@ -53,6 +53,7 @@ use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
+use futures::channel::{mpsc, oneshot};
 use futures::stream::FuturesUnordered;
 use futures::{pin_mut, select_biased, FutureExt, SinkExt, StreamExt};
 use lsp_types::notification::Notification;
@@ -64,7 +65,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::{mpsc, oneshot};
 use tower_service::Service;
 
 pub mod concurrency;
@@ -445,7 +445,7 @@ impl<S: LspService> Frontend<S> {
     }
 
     fn new(builder: impl FnOnce(PeerSocket) -> S) -> (Self, PeerSocket) {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded();
         let socket = PeerSocket { tx };
         let this = Self {
             service: builder(socket.clone()),
@@ -484,7 +484,7 @@ impl<S: LspService> Frontend<S> {
                 ret = flush_fut => { ret?; continue; }
 
                 resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
-                event = self.rx.recv().fuse() => self.dispatch_event(event.expect("Sender is alive")),
+                event = self.rx.next() => self.dispatch_event(event.expect("Sender is alive")),
                 msg = incoming.next() => self.dispatch_message(msg.expect("Never ends")?).await,
             };
             let msg = match ctl {
@@ -644,12 +644,12 @@ struct PeerSocket {
 
 impl PeerSocket {
     fn new_closed() -> Self {
-        let (tx, _rx) = mpsc::unbounded_channel();
+        let (tx, _rx) = mpsc::unbounded();
         Self { tx }
     }
 
     fn send(&self, v: MainLoopEvent) -> Result<()> {
-        self.tx.send(v).map_err(|_| Error::ServiceStopped)
+        self.tx.unbounded_send(v).map_err(|_| Error::ServiceStopped)
     }
 
     fn request<R: Request>(&self, params: R::Params) -> PeerSocketRequestFuture<R::Result> {
