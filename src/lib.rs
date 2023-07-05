@@ -36,11 +36,11 @@
 //!
 //! ## Cargo features
 //!
-//! - `client-monitor`: Client process monitor middleware [`client_monitor`]. This depends on [`tokio`].
+//! - `client-monitor`: Client process monitor middleware [`client_monitor`].
 //! - `omni-trait`: Mega traits of all standard requests and notifications, namely
 //!   [`LanguageServer`] and [`LanguageClient`].
 //! - `stdio`: Utilities to deal with pipe-like stdin/stdout communication channel for Language
-//!   Servers. This depends on [`tokio`].
+//!   Servers.
 //! - `tracing`: Intergration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
 //!
 //! All features are enabled by default.
