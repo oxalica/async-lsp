@@ -30,6 +30,8 @@ pub struct Tracing<S> {
     spans: TracingBuilder,
 }
 
+define_getters!(impl[S] Tracing<S>, service: S);
+
 impl<S: LspService> Service<AnyRequest> for Tracing<S> {
     type Response = JsonValue;
     type Error = ResponseError;

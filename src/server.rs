@@ -41,6 +41,8 @@ pub struct Lifecycle<S> {
     state: State,
 }
 
+define_getters!(impl[S] Lifecycle<S>, service: S);
+
 impl<S> Lifecycle<S> {
     /// Creating the `Lifecycle` middleware in uninitialized state.
     #[must_use]

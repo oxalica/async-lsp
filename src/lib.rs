@@ -67,6 +67,30 @@ use thiserror::Error;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tower_service::Service;
 
+macro_rules! define_getters {
+    (impl[$($generic:tt)*] $ty:ty, $field:ident : $field_ty:ty) => {
+        impl<$($generic)*> $ty {
+            /// Get a reference to the inner service.
+            #[must_use]
+            pub fn get_ref(&self) -> &$field_ty {
+                &self.$field
+            }
+
+            /// Get a mutable reference to the inner service.
+            #[must_use]
+            pub fn get_mut(&mut self) -> &mut $field_ty {
+                &mut self.$field
+            }
+
+            /// Consume self, returning the inner service.
+            #[must_use]
+            pub fn into_inner(self) -> $field_ty {
+                self.$field
+            }
+        }
+    };
+}
+
 pub mod concurrency;
 pub mod panic;
 pub mod router;
@@ -428,6 +452,8 @@ enum MainLoopEvent {
     OutgoingRequest(AnyRequest, oneshot::Sender<AnyResponse>),
     Any(AnyEvent),
 }
+
+define_getters!(impl[S: LspService] Frontend<S>, service: S);
 
 impl<S: LspService> Frontend<S> {
     /// Create a Language Server `Frontend`.

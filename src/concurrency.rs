@@ -38,6 +38,8 @@ pub struct Concurrency<S> {
     ongoing: HashMap<RequestId, AbortHandle>,
 }
 
+define_getters!(impl[S] Concurrency<S>, service: S);
+
 impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
     type Response = JsonValue;
     type Error = ResponseError;

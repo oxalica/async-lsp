@@ -24,6 +24,8 @@ pub struct CatchUnwind<S> {
     handler: Handler,
 }
 
+define_getters!(impl[S] CatchUnwind<S>, service: S);
+
 type Handler = fn(method: &str, payload: Box<dyn Any + Send>) -> ResponseError;
 
 fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError {
