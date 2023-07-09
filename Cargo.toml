@@ -20,6 +20,7 @@ client-monitor = ["rustix/event", "rustix/process", "windows-sys"]
 omni-trait = []
 stdio = ["rustix/fs", "tokio/net"]
 tracing = ["dep:tracing"]
+forward = []
 
 [[example]]
 name = "client_builder"
@@ -36,6 +37,10 @@ required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
 [[example]]
 name = "server_trait"
 required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
+
+[[example]]
+name = "inspector"
+required-features = ["forward", "tracing"]
 
 [[test]]
 name = "unit_test"

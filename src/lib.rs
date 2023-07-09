@@ -42,8 +42,10 @@
 //! - `stdio`: Utilities to deal with pipe-like stdin/stdout communication channel for Language
 //!   Servers.
 //! - `tracing`: Intergration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
+//! - `forward`: Impl [`LspService`] for `{Client,Server}Socket`. This collides some method names
+//!   but allows easy service forwarding. See `examples/inspector.rs` for a possible use case.
 //!
-//! All features are enabled by default.
+//! All features except `forward` are enabled by default.
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
@@ -95,6 +97,9 @@ pub mod concurrency;
 pub mod panic;
 pub mod router;
 pub mod server;
+
+#[cfg(feature = "forward")]
+mod forward;
 
 #[cfg(feature = "client-monitor")]
 pub mod client_monitor;
