@@ -16,9 +16,9 @@ rust-version = "1.64" # Sync with CI!
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
-client-monitor = ["rustix/event", "rustix/process", "windows-sys"]
+client-monitor = ["dep:waitpid-any", "dep:rustix"]
 omni-trait = []
-stdio = ["rustix/fs", "tokio/net"]
+stdio = ["dep:rustix", "rustix?/fs", "tokio/net"]
 tracing = ["dep:tracing"]
 forward = []
 
@@ -64,9 +64,7 @@ tokio = { version = "1.27.0", features = ["io-util"] }
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
 tracing = { version = "0.1.37", optional = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.48.0", features = ["Win32_Foundation", "Win32_System_Threading"], optional = true }
+waitpid-any = { version = "0.1.0", optional = true }
 
 [dev-dependencies]
 async-io = "1.13.0"

@@ -16,15 +16,7 @@
 //!
 //! And this middleware does exactly this monitor mechanism.
 //!
-//! Implementation:
-//! - On Linux, it uses [`pidfd_open(2)`](https://man7.org/linux/man-pages/man2/pidfd_open.2.html)
-//!   which is supported since Linux 5.3.
-//! - On other platforms, it perioidically calls
-//!   [`kill(2)`](https://man7.org/linux/man-pages/man2/kill.2.html) with zero `sig` to test the
-//!   validity of the PID, without actually sending signals. The checking period is currently 30s
-//!   but should not be relied on.
-//!
-use std::io;
+//! Implementation: See crate [`waitpid_any`].
 use std::ops::ControlFlow;
 use std::task::{Context, Poll};
 
@@ -66,36 +58,43 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                 .try_into()
                 .ok()
         })() {
-            let client = self.client.clone();
-            let ret = std::thread::Builder::new()
-                .name("client-process-monitor".into())
-                .spawn(move || {
-                    #[cfg(target_os = "linux")]
-                    use wait_for_pid_pidfd as wait_for_pid;
-
-                    #[cfg(all(unix, not(target_os = "linux")))]
-                    use wait_for_pid_kill as wait_for_pid;
-
-                    #[cfg(windows)]
-                    use wait_for_pid_wfso as wait_for_pid;
-
-                    match wait_for_pid(pid) {
-                        Ok(()) => {
-                            // Ignore channel close.
-                            let _: Result<_, _> = client.emit(ClientProcessExited);
-                        }
-                        Err(_err) => {
-                            #[cfg(feature = "tracing")]
-                            ::tracing::error!("Failed to monitor peer process ({pid}): {_err:#}");
-                        }
+            match waitpid_any::WaitHandle::open(pid) {
+                Ok(mut handle) => {
+                    let client = self.client.clone();
+                    let ret = std::thread::Builder::new()
+                        .name("client-process-monitor".into())
+                        .spawn(move || {
+                            match handle.wait() {
+                                Ok(()) => {
+                                    // Ignore channel close.
+                                    let _: Result<_, _> = client.emit(ClientProcessExited);
+                                }
+                                #[allow(unused_variables)]
+                                Err(err) => {
+                                    #[cfg(feature = "tracing")]
+                                    ::tracing::error!(
+                                        "Failed to monitor peer process ({pid}): {err:#}"
+                                    );
+                                }
+                            }
+                        });
+                    #[allow(unused_variables)]
+                    if let Err(err) = ret {
+                        #[cfg(feature = "tracing")]
+                        ::tracing::error!("Failed to spawn client process monitor thread: {err:#}");
                     }
-                });
-
-            // Unused without `tracing`.
-            #[allow(unused_variables)]
-            if let Err(err) = ret {
-                #[cfg(feature = "tracing")]
-                ::tracing::error!("Failed to spawn client process monitor thread: {err:#}");
+                }
+                // Already exited.
+                #[cfg(unix)]
+                Err(err) if err.raw_os_error() == Some(rustix::io::Errno::SRCH.raw_os_error()) => {
+                    // Ignore channel close.
+                    let _: Result<_, _> = self.client.emit(ClientProcessExited);
+                }
+                #[allow(unused_variables)]
+                Err(err) => {
+                    #[cfg(feature = "tracing")]
+                    ::tracing::error!("Failed to monitor peer process {pid}: {err:#}");
+                }
             }
         }
 
@@ -143,216 +142,5 @@ impl<S> Layer<S> for ClientProcessMonitorBuilder {
             service: inner,
             client: self.client.clone(),
         }
-    }
-}
-
-#[cfg(target_os = "linux")]
-fn wait_for_pid_pidfd(pid: i32) -> io::Result<()> {
-    use rustix::event::{poll, PollFd, PollFlags};
-    use rustix::io::{retry_on_intr, Errno};
-    use rustix::process::{pidfd_open, Pid, PidfdFlags};
-
-    let pid = Pid::from_raw(pid)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
-    let pidfd = match pidfd_open(pid, PidfdFlags::empty()) {
-        Ok(pidfd) => pidfd,
-        // Already exited.
-        Err(Errno::SRCH) => return Ok(()),
-        Err(err) => return Err(err.into()),
-    };
-    let mut fds = [PollFd::new(&pidfd, PollFlags::IN)];
-    retry_on_intr(|| poll(&mut fds, -1 /* Infinite wait */))?;
-    Ok(())
-}
-
-#[cfg(all(unix, any(test, not(target_os = "linux"))))]
-fn wait_for_pid_kill(pid: i32) -> io::Result<()> {
-    use std::time::Duration;
-
-    use rustix::io::Errno;
-    use rustix::process::{test_kill_process, Pid};
-
-    // Accuracy doesn't matter.
-    // This monitor is only to avoid process leakage when the peer goes wrong.
-    #[cfg(not(test))]
-    const POLL_PERIOD: Duration = Duration::from_secs(30);
-    // But it matters in tests.
-    #[cfg(test)]
-    const POLL_PERIOD: Duration = Duration::from_millis(100);
-
-    fn is_alive(pid: Pid) -> io::Result<bool> {
-        match test_kill_process(pid) {
-            Ok(()) => Ok(true),
-            Err(Errno::SRCH) => Ok(false),
-            Err(err) => Err(err.into()),
-        }
-    }
-
-    #[cfg(feature = "tracing")]
-    ::tracing::warn!("Unsupported platform to monitor exit of non-child processes, fallback to polling with kill(2)");
-
-    let pid = Pid::from_raw(pid)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::Other, format!("Invalid PID {pid}")))?;
-    while is_alive(pid)? {
-        std::thread::sleep(POLL_PERIOD);
-    }
-    Ok(())
-}
-
-#[cfg(windows)]
-fn wait_for_pid_wfso(pid: i32) -> io::Result<()> {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, WaitForSingleObject, INFINITE, PROCESS_SYNCHRONIZE,
-    };
-
-    unsafe {
-        let process = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid as _);
-        if process == 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let ret = WaitForSingleObject(process, INFINITE);
-        CloseHandle(process);
-        if ret == WAIT_OBJECT_0 {
-            Ok(())
-        } else {
-            Err(io::Error::last_os_error())
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::io::{BufRead, BufReader};
-    use std::process::{Command, Stdio};
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    // Don't stuck when something goes wrong.
-    const FUSE_DURATION_SEC: u32 = 10;
-    const WAIT_DURATION: Duration = Duration::from_secs(1);
-    // NB. Should be greater than `POLL_PERIOD`.
-    const TOLERANCE: Duration = Duration::from_millis(250);
-
-    #[cfg(target_os = "linux")]
-    #[test]
-    fn wait_for_pid_pidfd() {
-        run_test(super::wait_for_pid_pidfd);
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn wait_for_pid_kill() {
-        run_test(super::wait_for_pid_kill);
-    }
-
-    #[cfg(unix)]
-    fn run_test(wait_for_pid: fn(i32) -> std::io::Result<()>) {
-        use rustix::io::Errno;
-        use rustix::process::{kill_process, waitpid, Pid, Signal, WaitOptions};
-
-        let mut child = Command::new("sh")
-            .args([
-                "-c",
-                &format!(
-                    "
-                    sleep {FUSE_DURATION_SEC} &
-                    echo $!
-                    "
-                ),
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to run sh");
-        let nonchild_raw_pid = {
-            let mut buf = String::new();
-            BufReader::new(child.stdout.as_mut().unwrap())
-                .read_line(&mut buf)
-                .unwrap();
-            buf.trim().parse::<i32>().unwrap()
-        };
-        assert!(nonchild_raw_pid >= 2);
-
-        // Grandchildren should not be children.
-        let nonchild_pid = Pid::from_raw(nonchild_raw_pid).unwrap();
-        assert_ne!(child.id(), nonchild_raw_pid as u32);
-        assert_eq!(
-            waitpid(Some(nonchild_pid), WaitOptions::NOHANG).unwrap_err(),
-            Errno::CHILD
-        );
-
-        let wait_task = thread::spawn(move || wait_for_pid(nonchild_raw_pid));
-
-        // Wait for some time to make sure no unexpected returns.
-        thread::sleep(WAIT_DURATION);
-        if wait_task.is_finished() {
-            panic!(
-                "Returned while the process still alive: {:?}",
-                wait_task.join(),
-            );
-        }
-
-        // Kill the grandchild, and it should return in time.
-        kill_process(nonchild_pid, Signal::Term).unwrap();
-
-        let inst = Instant::now();
-        wait_task
-            .join()
-            .expect("must not panic")
-            .expect("must succeed");
-        let elapsed = inst.elapsed();
-        assert!(elapsed < TOLERANCE, "Wait for too long? {elapsed:?}");
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn wait_for_pid_wfso() {
-        let mut child = Command::new("powershell")
-            .args(["-Command", &format!(
-                "(Start-Process -PassThru -FilePath timeout -ArgumentList {FUSE_DURATION_SEC} -WindowStyle Hidden).Id"
-            )])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::inherit())
-            .spawn()
-            .expect("Failed to run powershell");
-        let nonchild_raw_pid = {
-            let mut buf = String::new();
-            BufReader::new(child.stdout.as_mut().unwrap())
-                .read_line(&mut buf)
-                .unwrap();
-            buf.trim().parse::<i32>().unwrap()
-        };
-
-        // Grandchildren should not be children.
-        assert_ne!(child.id(), nonchild_raw_pid as u32);
-
-        let wait_task = thread::spawn(move || super::wait_for_pid_wfso(nonchild_raw_pid));
-
-        // Wait for some time to make sure no unexpected returns.
-        thread::sleep(WAIT_DURATION);
-        if wait_task.is_finished() {
-            panic!(
-                "Returned while the process still alive: {:?}",
-                wait_task.join(),
-            );
-        }
-
-        // Kill the grandchild, and it should return in time.
-        assert!(Command::new("taskkill")
-            .args(["/f", "/pid", &nonchild_raw_pid.to_string()])
-            .status()
-            .unwrap()
-            .success());
-
-        let inst = Instant::now();
-        wait_task
-            .join()
-            .expect("must not panic")
-            .expect("must succeed");
-        let elapsed = inst.elapsed();
-        assert!(elapsed < TOLERANCE, "Wait for too long? {elapsed:?}");
     }
 }
