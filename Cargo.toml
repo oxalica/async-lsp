@@ -7,12 +7,19 @@ keywords = ["lsp", "language-server", "tower"]
 categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
-exclude = ["/generate_omni_trait.sh"]
-
 # Required features:
 # - std::future::poll_fn
 # - std::task::ready!
 rust-version = "1.64" # Sync with CI!
+include = [
+    "/Cargo.toml",
+    "/LICENSE-APACHE",
+    "/LICENSE-MIT",
+    "/README.md",
+    "/examples",
+    "/src",
+    "/tests",
+]
 
 [features]
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
