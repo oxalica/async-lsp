@@ -201,53 +201,78 @@ mod tokio_impl {
 
     use futures::ready;
     use tokio::io::unix::AsyncFd;
-    use tokio::io::{AsyncRead, AsyncWrite, Interest, ReadBuf};
+    use tokio::io::{Interest, ReadBuf};
 
     use super::*;
 
-    struct TokioPipeStdin {
+    pub struct TokioPipeStdin {
         inner: AsyncFd<PipeStdin>,
     }
 
-    impl AsyncRead for TokioPipeStdin {
+    impl futures::AsyncRead for TokioPipeStdin {
         fn poll_read(
             self: Pin<&mut Self>,
             cx: &mut Context<'_>,
-            buf: &mut ReadBuf<'_>,
-        ) -> Poll<io::Result<()>> {
+            buf: &mut [u8],
+        ) -> Poll<Result<usize>> {
             loop {
                 let mut guard = ready!(self.inner.poll_read_ready(cx))?;
-                let unfilled = buf.initialize_unfilled();
-                match guard.try_io(|inner| inner.get_ref().read(unfilled)) {
-                    Ok(Ok(len)) => {
-                        buf.advance(len);
-                        return Poll::Ready(Ok(()));
-                    }
-                    Ok(Err(err)) => return Poll::Ready(Err(err)),
+                match guard.try_io(|inner| inner.get_ref().read(buf)) {
+                    Ok(ret) => return Poll::Ready(ret),
+                    Err(_would_block) => continue,
+                }
+            }
+        }
+
+        fn poll_read_vectored(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            bufs: &mut [io::IoSliceMut<'_>],
+        ) -> Poll<Result<usize>> {
+            loop {
+                let mut guard = ready!(self.inner.poll_read_ready(cx))?;
+                match guard.try_io(|inner| inner.get_ref().read_vectored(bufs)) {
+                    Ok(ret) => return Poll::Ready(ret),
                     Err(_would_block) => continue,
                 }
             }
         }
     }
 
+    impl tokio::io::AsyncRead for TokioPipeStdin {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            let len = ready!(<Self as futures::AsyncRead>::poll_read(
+                self,
+                cx,
+                buf.initialize_unfilled()
+            ))?;
+            buf.advance(len);
+            Poll::Ready(Ok(()))
+        }
+    }
+
     impl PipeStdin {
         /// Shortcut to [`PipeStdin::lock`] and then [`PipeStdin::try_into_tokio`].
-        pub fn lock_tokio() -> Result<impl AsyncRead> {
+        pub fn lock_tokio() -> Result<TokioPipeStdin> {
             Self::lock()?.try_into_tokio()
         }
 
         /// Register the FD to the tokio runtime and return a tokio compatible reader.
-        pub fn try_into_tokio(self) -> Result<impl AsyncRead> {
+        pub fn try_into_tokio(self) -> Result<TokioPipeStdin> {
             let inner = AsyncFd::with_interest(self, Interest::READABLE)?;
             Ok(TokioPipeStdin { inner })
         }
     }
 
-    struct TokioPipeStdout {
+    pub struct TokioPipeStdout {
         inner: AsyncFd<PipeStdout>,
     }
 
-    impl AsyncWrite for TokioPipeStdout {
+    impl futures::AsyncWrite for TokioPipeStdout {
         fn poll_write(
             self: Pin<&mut Self>,
             cx: &mut Context<'_>,
@@ -262,6 +287,38 @@ mod tokio_impl {
             }
         }
 
+        fn poll_write_vectored(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            bufs: &[IoSlice<'_>],
+        ) -> Poll<Result<usize>> {
+            loop {
+                let mut guard = ready!(self.inner.poll_write_ready(cx))?;
+                match guard.try_io(|inner| inner.get_ref().write_vectored(bufs)) {
+                    Ok(result) => return Poll::Ready(result),
+                    Err(_would_block) => continue,
+                }
+            }
+        }
+
+        fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+
+        fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+
+    impl tokio::io::AsyncWrite for TokioPipeStdout {
+        fn poll_write(
+            self: Pin<&mut Self>,
+            cx: &mut Context<'_>,
+            buf: &[u8],
+        ) -> Poll<Result<usize>> {
+            <Self as futures::AsyncWrite>::poll_write(self, cx, buf)
+        }
+
         fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<()>> {
             Poll::Ready(Ok(()))
         }
@@ -273,12 +330,12 @@ mod tokio_impl {
 
     impl PipeStdout {
         /// Shortcut to [`PipeStdout::lock`] and then [`PipeStdout::try_into_tokio`].
-        pub fn lock_tokio() -> Result<impl AsyncWrite> {
+        pub fn lock_tokio() -> Result<TokioPipeStdout> {
             Self::lock()?.try_into_tokio()
         }
 
         /// Register the FD to the tokio runtime and return a tokio compatible writer.
-        pub fn try_into_tokio(self) -> Result<impl AsyncWrite> {
+        pub fn try_into_tokio(self) -> Result<TokioPipeStdout> {
             let inner = AsyncFd::with_interest(self, Interest::WRITABLE)?;
             Ok(TokioPipeStdout { inner })
         }
