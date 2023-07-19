@@ -1,3 +1,5 @@
 /target
 /Cargo.lock
 /metaModel.json
+/perf*.data*
+/flamegraph*.svg

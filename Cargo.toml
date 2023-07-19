@@ -16,6 +16,7 @@ include = [
     "/LICENSE-APACHE",
     "/LICENSE-MIT",
     "/README.md",
+    "/benches",
     "/examples",
     "/src",
     "/tests",
@@ -58,6 +59,10 @@ name = "stdio"
 harness = false
 required-features = ["stdio", "tokio"]
 
+[[bench]]
+name = "bench"
+harness = false
+
 [dependencies]
 futures = { version = "0.3.28", default-features = false, features = ["async-await", "std"] }
 lsp-types = "0.94.0"
@@ -75,10 +80,14 @@ waitpid-any = { version = "0.2.0", optional = true }
 [dev-dependencies]
 async-io = "1.13.0"
 async-process = "1.7.0"
+criterion = { version = "0.5.1", features = ["async_tokio"] }
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "process", "rt", "time"] }
 tokio-util = { version = "0.7.8", features = ["compat"] }
 tower = "0.4.13"
 tracing-subscriber = "0.3.16"
+
+[profile.bench]
+debug = 1
 
 [package.metadata.docs.rs]
 all-features = true
