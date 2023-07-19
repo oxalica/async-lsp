@@ -8,6 +8,7 @@ use async_lsp::router::Router;
 use async_lsp::tracing::TracingLayer;
 use async_lsp::{LanguageClient, LanguageServer, ResponseError};
 use futures::channel::oneshot;
+use futures::io::BufReader;
 use lsp_types::{
     ClientCapabilities, DidOpenTextDocumentParams, HoverParams, InitializeParams,
     InitializedParams, NumberOrString, Position, ProgressParams, ProgressParamsValue,
@@ -15,7 +16,6 @@ use lsp_types::{
     TextDocumentPositionParams, Url, WindowClientCapabilities, WorkDoneProgress,
     WorkDoneProgressParams,
 };
-use tokio::io::BufReader;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 
@@ -86,7 +86,7 @@ async fn main() {
         .with_writer(std::io::stderr)
         .init();
 
-    let child = tokio::process::Command::new("rust-analyzer")
+    let child = async_process::Command::new("rust-analyzer")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())

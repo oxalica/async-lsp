@@ -6,13 +6,15 @@ use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::{ClientSocket, LanguageClient, LanguageServer};
 use futures::channel::mpsc;
-use futures::StreamExt;
+use futures::io::BufReader;
+use futures::{AsyncReadExt, StreamExt};
 use lsp_types::{
     notification, request, ConfigurationItem, ConfigurationParams, Hover, HoverContents,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
     MarkedString, MessageType, Position, ServerCapabilities, ShowMessageParams,
     TextDocumentIdentifier, TextDocumentPositionParams, WorkDoneProgressParams,
 };
+use tokio_util::compat::TokioAsyncReadCompatExt;
 use tower::ServiceBuilder;
 
 const MEMORY_CHANNEL_SIZE: usize = 64 << 10; // 64KiB
@@ -89,12 +91,10 @@ async fn mock_server_and_client() {
 
     // Wire up a loopback channel between the server and the client.
     let (server_stream, client_stream) = tokio::io::duplex(MEMORY_CHANNEL_SIZE);
-    let (server_rx, server_tx) = tokio::io::split(server_stream);
-    let server_main =
-        tokio::spawn(server_main.run(tokio::io::BufReader::new(server_rx), server_tx));
-    let (client_rx, client_tx) = tokio::io::split(client_stream);
-    let client_main =
-        tokio::spawn(client_main.run(tokio::io::BufReader::new(client_rx), client_tx));
+    let (server_rx, server_tx) = server_stream.compat().split();
+    let server_main = tokio::spawn(server_main.run(BufReader::new(server_rx), server_tx));
+    let (client_rx, client_tx) = client_stream.compat().split();
+    let client_main = tokio::spawn(client_main.run(BufReader::new(client_rx), client_tx));
 
     // Send requests to the server on behalf of the client, via `ServerSocket`. It interacts with
     // the client main loop to finalize and send the request through the channel.

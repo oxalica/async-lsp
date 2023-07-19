@@ -8,11 +8,11 @@ use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::tracing::TracingLayer;
 use async_lsp::ClientSocket;
+use futures::io::BufReader;
 use lsp_types::{
     notification, request, Hover, HoverContents, HoverProviderCapability, InitializeResult,
     MarkedString, MessageType, OneOf, ServerCapabilities, ShowMessageParams,
 };
-use tokio::io::BufReader;
 use tower::ServiceBuilder;
 use tracing::{info, Level};
 
@@ -111,7 +111,10 @@ async fn main() {
     );
     // Fallback to spawn blocking read/write otherwise.
     #[cfg(not(unix))]
-    let (stdin, stdout) = (tokio::io::stdin(), tokio::io::stdout());
+    let (stdin, stdout) = (
+        tokio_util::compat::TokioAsyncReadCompatExt::compat(tokio::io::stdin()),
+        tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),
+    );
 
     let stdin = BufReader::new(stdin);
     server.run(stdin, stdout).await.unwrap();

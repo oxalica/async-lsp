@@ -57,7 +57,10 @@ use std::{fmt, io};
 
 use futures::channel::{mpsc, oneshot};
 use futures::stream::FuturesUnordered;
-use futures::{pin_mut, select_biased, FutureExt, SinkExt, StreamExt};
+use futures::{
+    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt,
+    FutureExt, SinkExt, StreamExt,
+};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
@@ -66,7 +69,6 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use thiserror::Error;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tower_service::Service;
 
 macro_rules! define_getters {
