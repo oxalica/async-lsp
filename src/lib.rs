@@ -37,15 +37,20 @@
 //! ## Cargo features
 //!
 //! - `client-monitor`: Client process monitor middleware [`client_monitor`].
+//!   *Enabled by default.*
 //! - `omni-trait`: Mega traits of all standard requests and notifications, namely
 //!   [`LanguageServer`] and [`LanguageClient`].
+//!   *Enabled by default.*
 //! - `stdio`: Utilities to deal with pipe-like stdin/stdout communication channel for Language
 //!   Servers.
+//!   *Enabled by default.*
 //! - `tracing`: Intergration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
+//!   *Enabled by default.*
 //! - `forward`: Impl [`LspService`] for `{Client,Server}Socket`. This collides some method names
 //!   but allows easy service forwarding. See `examples/inspector.rs` for a possible use case.
-//!
-//! All features except `forward` are enabled by default.
+//!   *Disabled by default.*
+//! - `tokio`: Enable compatible methods for [`tokio`](https://crates.io/crates/tokio) runtime.
+//!   *Disabled by default.*
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};

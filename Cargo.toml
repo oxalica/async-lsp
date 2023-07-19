@@ -18,38 +18,38 @@ rust-version = "1.64" # Sync with CI!
 default = ["client-monitor", "omni-trait", "stdio", "tracing"]
 client-monitor = ["dep:waitpid-any", "dep:rustix"]
 omni-trait = []
-stdio = ["dep:rustix", "rustix?/fs", "tokio/net"]
+stdio = ["dep:rustix", "rustix?/fs", "tokio?/net"]
 tracing = ["dep:tracing"]
 forward = []
 
 [[example]]
 name = "client_builder"
-required-features = ["omni-trait", "tracing"]
+required-features = ["omni-trait", "tracing", "tokio"]
 
 [[example]]
 name = "client_trait"
-required-features = ["omni-trait", "tracing"]
+required-features = ["omni-trait", "tracing", "tokio"]
 
 [[example]]
 name = "server_builder"
-required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
+required-features = ["client-monitor", "omni-trait", "stdio", "tracing", "tokio"]
 
 [[example]]
 name = "server_trait"
-required-features = ["client-monitor", "omni-trait", "stdio", "tracing"]
+required-features = ["client-monitor", "omni-trait", "stdio", "tracing", "tokio"]
 
 [[example]]
 name = "inspector"
-required-features = ["forward", "tracing"]
+required-features = ["forward", "tracing", "tokio"]
 
 [[test]]
 name = "unit_test"
-required-features = ["omni-trait"]
+required-features = ["omni-trait", "tokio"]
 
 [[test]]
 name = "stdio"
 harness = false
-required-features = ["stdio"]
+required-features = ["stdio", "tokio"]
 
 [dependencies]
 either = "1.8.1"
@@ -60,7 +60,7 @@ rustix = { version = "0.38", optional = true }
 serde = { version = "1.0.159", features = ["derive"] }
 serde_json = "1.0.95"
 thiserror = "1.0.40"
-tokio = { version = "1.27.0", features = ["io-util"] }
+tokio = { version = "1.27.0", optional = true }
 tower-layer = "0.3.2"
 tower-service = "0.3.2"
 tracing = { version = "0.1.37", optional = true }

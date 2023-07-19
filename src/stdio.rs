@@ -41,10 +41,11 @@
 //! # }
 //! ```
 //!
-//! For [`tokio`], their interface is
+//! For `tokio` runtime, their interface is
 //! [less ergonomic](https://github.com/tokio-rs/tokio/issues/5785).
-//! We provide a wrapper method [`PipeStdin::lock_tokio`] to provide an [`tokio::io::AsyncRead`]
-//! compatible interface. [`PipeStdout`] works in class.
+//! We provide a wrapper method `PipeStdin::lock_tokio` for an `tokio::io::AsyncRead`
+//! compatible interface. [`PipeStdout`] works in class. All of them are gated under feature
+//! `tokio`.
 use std::io::{self, Error, ErrorKind, IoSlice, Read, Result, StdinLock, StdoutLock, Write};
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
@@ -195,6 +196,7 @@ impl Write for PipeStdout {
 
 // Tokio compatibility.
 // We can simplify these if we have https://github.com/tokio-rs/tokio/issues/5785
+#[cfg(feature = "tokio")]
 mod tokio_impl {
     use std::pin::Pin;
     use std::task::{Context, Poll};
