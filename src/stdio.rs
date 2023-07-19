@@ -197,6 +197,7 @@ impl Write for PipeStdout {
 // Tokio compatibility.
 // We can simplify these if we have https://github.com/tokio-rs/tokio/issues/5785
 #[cfg(feature = "tokio")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tokio")))]
 mod tokio_impl {
     use std::pin::Pin;
     use std::task::{Context, Poll};

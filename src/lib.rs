@@ -51,6 +51,7 @@
 //!   *Disabled by default.*
 //! - `tokio`: Enable compatible methods for [`tokio`](https://crates.io/crates/tokio) runtime.
 //!   *Disabled by default.*
+#![cfg_attr(docsrs, feature(doc_cfg))]
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
@@ -106,20 +107,25 @@ pub mod router;
 pub mod server;
 
 #[cfg(feature = "forward")]
+#[cfg_attr(docsrs, doc(cfg(feature = "forward")))]
 mod forward;
 
 #[cfg(feature = "client-monitor")]
+#[cfg_attr(docsrs, doc(cfg(feature = "client-monitor")))]
 pub mod client_monitor;
 
 #[cfg(all(feature = "stdio", unix))]
+#[cfg_attr(docsrs, doc(cfg(all(feature = "stdio", unix))))]
 pub mod stdio;
 
 #[cfg(feature = "tracing")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tracing")))]
 pub mod tracing;
 
 #[cfg(feature = "omni-trait")]
 mod omni_trait;
 #[cfg(feature = "omni-trait")]
+#[cfg_attr(docsrs, doc(cfg(feature = "omni-trait")))]
 pub use omni_trait::{LanguageClient, LanguageServer};
 
 /// A convenient type alias for `Result` with `E` = [`enum@crate::Error`].
