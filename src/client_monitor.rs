@@ -61,7 +61,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
             match waitpid_any::WaitHandle::open(pid) {
                 Ok(mut handle) => {
                     let client = self.client.clone();
-                    let ret = std::thread::Builder::new()
+                    let spawn_ret = std::thread::Builder::new()
                         .name("client-process-monitor".into())
                         .spawn(move || {
                             match handle.wait() {
@@ -79,7 +79,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                             }
                         });
                     #[allow(unused_variables)]
-                    if let Err(err) = ret {
+                    if let Err(err) = spawn_ret {
                         #[cfg(feature = "tracing")]
                         ::tracing::error!("Failed to spawn client process monitor thread: {err:#}");
                     }

@@ -60,14 +60,14 @@ where
         let fut = self.service.call(req);
         let outgoing = self.outgoing;
         Box::pin(async move {
-            let ret = fut.await;
+            let resp_ret = fut.await;
             tracing::info!(
                 "{} response {}: {}",
                 outgoing,
                 method,
-                if ret.is_ok() { "ok" } else { "err" },
+                if resp_ret.is_ok() { "ok" } else { "err" },
             );
-            ret
+            resp_ret
         })
     }
 }

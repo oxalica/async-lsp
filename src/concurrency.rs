@@ -66,7 +66,7 @@ impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
             "`poll_ready` is not called before `call`",
         );
 
-        let (handle, reg) = AbortHandle::new_pair();
+        let (handle, registration) = AbortHandle::new_pair();
 
         // Regularly purge completed or dead tasks. See also `AbortOnDrop` below.
         // This costs 2*N time to remove at least N tasks, results in amortized O(1) time cost
@@ -77,7 +77,7 @@ impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
         self.ongoing.insert(req.id.clone(), handle.clone());
 
         let fut = self.service.call(req);
-        let fut = Abortable::new(fut, reg);
+        let fut = Abortable::new(fut, registration);
         ResponseFuture {
             fut,
             _abort_on_drop: AbortOnDrop(handle),
@@ -95,7 +95,7 @@ impl Drop for SemaphoreGuard {
                 // Return the token first.
                 drop(sema);
                 // Wake up `poll_ready`. Implicit "Release".
-                waker.wake()
+                waker.wake();
             }
         }
     }

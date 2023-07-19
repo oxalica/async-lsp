@@ -35,11 +35,6 @@ impl Future for PeerSocketResponseFuture {
 }
 
 impl PeerSocket {
-    fn on_poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), ResponseError>> {
-        // `*Socket` has an unbounded buffer, thus is always ready.
-        Poll::Ready(Ok(()))
-    }
-
     fn on_call(&mut self, req: AnyRequest) -> PeerSocketResponseFuture {
         let (tx, rx) = oneshot::channel();
         let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(req, tx));
@@ -69,8 +64,9 @@ macro_rules! define_socket_wrappers {
             type Error = ResponseError;
             type Future = PeerSocketResponseFuture;
 
-            fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-                self.0.on_poll_ready(cx)
+            fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+                // `*Socket` has an unbounded buffer, thus is always ready.
+                Poll::Ready(Ok(()))
             }
 
             fn call(&mut self, req: AnyRequest) -> Self::Future {

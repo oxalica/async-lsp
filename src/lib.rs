@@ -52,6 +52,7 @@
 //! - `tokio`: Enable compatible methods for [`tokio`](https://crates.io/crates/tokio) runtime.
 //!   *Disabled by default.*
 #![cfg_attr(docsrs, feature(doc_cfg))]
+#![warn(missing_docs)]
 use std::any::{type_name, Any, TypeId};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
@@ -506,6 +507,8 @@ impl<S: LspService> MainLoop<S> {
     ///
     /// Shortcut to [`MainLoop::run`] that accept an `impl AsyncRead` and implicit wrap it in a
     /// [`BufReader`].
+    // Documented in `Self::run`.
+    #[allow(clippy::missing_errors_doc)]
     pub async fn run_bufferred(self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
         self.run(BufReader::new(input), output).await
     }
@@ -513,6 +516,7 @@ impl<S: LspService> MainLoop<S> {
     /// Drive the service main loop to provide the service.
     ///
     /// # Errors
+    ///
     /// - `Error::Io` when the underlying `input` or `output` raises an error.
     /// - `Error::Deserialize` when the peer sends undecodable or invalid message.
     /// - `Error::Protocol` when the peer violates Language Server Protocol.
@@ -642,6 +646,7 @@ macro_rules! impl_socket_wrapper {
             ///
             /// To prevent accidental misusages, this method is NOT implemented as
             /// [`Default::default`] intentionally.
+            #[must_use]
             pub fn new_closed() -> Self {
                 Self(PeerSocket::new_closed())
             }

@@ -260,11 +260,19 @@ mod tokio_impl {
 
     impl PipeStdin {
         /// Shortcut to [`PipeStdin::lock`] and then [`PipeStdin::try_into_tokio`].
+        ///
+        /// # Errors
+        ///
+        /// Fails if cannot create [`AsyncFd`].
         pub fn lock_tokio() -> Result<TokioPipeStdin> {
             Self::lock()?.try_into_tokio()
         }
 
         /// Register the FD to the tokio runtime and return a tokio compatible reader.
+        ///
+        /// # Errors
+        ///
+        /// Fails if cannot create [`AsyncFd`].
         pub fn try_into_tokio(self) -> Result<TokioPipeStdin> {
             let inner = AsyncFd::with_interest(self, Interest::READABLE)?;
             Ok(TokioPipeStdin { inner })
@@ -333,11 +341,19 @@ mod tokio_impl {
 
     impl PipeStdout {
         /// Shortcut to [`PipeStdout::lock`] and then [`PipeStdout::try_into_tokio`].
+        ///
+        /// # Errors
+        ///
+        /// Fails if cannot create [`AsyncFd`].
         pub fn lock_tokio() -> Result<TokioPipeStdout> {
             Self::lock()?.try_into_tokio()
         }
 
         /// Register the FD to the tokio runtime and return a tokio compatible writer.
+        ///
+        /// # Errors
+        ///
+        /// Fails if cannot create [`AsyncFd`].
         pub fn try_into_tokio(self) -> Result<TokioPipeStdout> {
             let inner = AsyncFd::with_interest(self, Interest::WRITABLE)?;
             Ok(TokioPipeStdout { inner })
