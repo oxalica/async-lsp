@@ -4,12 +4,19 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Instant;
 
-use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService, MainLoop, ResponseError};
+use async_lsp::{
+    AnyEvent, AnyNotification, AnyRequest, ClientSocket, ErrorCode, LspService, MainLoop,
+    ResponseError,
+};
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use futures::future::Pending;
+use futures::future::{ready, Ready};
 use futures::{AsyncBufRead, AsyncRead, AsyncWrite};
 use lsp_types::notification::{LogMessage, Notification};
-use lsp_types::{LogMessageParams, MessageType};
+use lsp_types::request::{Request, SemanticTokensFullRequest};
+use lsp_types::{
+    LogMessageParams, MessageType, PartialResultParams, SemanticTokens, SemanticTokensParams,
+    SemanticTokensResult, TextDocumentIdentifier, WorkDoneProgressParams,
+};
 use serde_json::json;
 use tower_service::Service;
 
@@ -21,22 +28,27 @@ fn bench(c: &mut Criterion) {
         .build()
         .unwrap();
 
+    let notification_frame = gen_input_frame(json!({
+        "jsonrpc": "2.0",
+        "method": LogMessage::METHOD,
+        "params": serde_json::to_value(LogMessageParams {
+            typ: MessageType::LOG,
+            message: "log".into(),
+        }).unwrap(),
+    }));
+
     c.bench_function("input-notification", |b| {
-        let frame = gen_lsp_frame(json!({
-            "jsonrpc": "2.0",
-            "method": LogMessage::METHOD.to_owned(),
-            "params": serde_json::to_value(LogMessageParams {
-                typ: MessageType::LOG,
-                message: "log".into(),
-            }).unwrap(),
-        }));
         b.to_async(&rt).iter_custom(|iters| {
-            let input = RingReader::from(&*frame);
+            let mut input = RingReader::from(&*notification_frame);
             async move {
                 let (mainloop, _client) = MainLoop::new_server(|_| TestService {
                     count_notifications: iters,
                 });
-                let fut = mainloop.run(black_box(input), futures::io::sink());
+                let fut = mainloop.run(
+                    black_box(Pin::new(&mut input) as Pin<&mut dyn AsyncBufRead>),
+                    futures::io::sink(),
+                );
+
                 let inst = Instant::now();
                 fut.await.unwrap();
                 inst.elapsed()
@@ -60,11 +72,49 @@ fn bench(c: &mut Criterion) {
             client.emit(()).unwrap();
 
             let mut output = futures::io::sink();
-            let output = Pin::new(&mut output) as Pin<&mut dyn AsyncWrite>;
-            let fut = black_box(mainloop).run(PendingReader, black_box(output));
+            let fut = mainloop.run(
+                PendingReader,
+                black_box(Pin::new(&mut output) as Pin<&mut dyn AsyncWrite>),
+            );
+
             let inst = Instant::now();
             fut.await.unwrap();
             inst.elapsed()
+        });
+    });
+
+    let request_frame = gen_input_frame(json!({
+        "jsonrpc": "2.0",
+        "method": SemanticTokensFullRequest::METHOD,
+        "id": 42,
+        "params": SemanticTokensParams {
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            text_document: TextDocumentIdentifier::new("untitled:Untitled-1".parse().unwrap()),
+        },
+    }));
+
+    c.bench_function("request-throughput", |b| {
+        b.to_async(&rt).iter_custom(|iters| {
+            let mut input = RingReader::from(&*request_frame);
+            async move {
+                let (mainloop, client) = MainLoop::new_server(|_| TestService {
+                    count_notifications: 0,
+                });
+
+                let mut output = CounterWriter {
+                    limit: iters,
+                    client,
+                };
+                let fut = mainloop.run(
+                    black_box(Pin::new(&mut input) as Pin<&mut dyn AsyncBufRead>),
+                    black_box(Pin::new(&mut output) as Pin<&mut dyn AsyncWrite>),
+                );
+
+                let inst = Instant::now();
+                fut.await.unwrap();
+                inst.elapsed()
+            }
         });
     });
 }
@@ -76,14 +126,28 @@ struct TestService {
 impl Service<AnyRequest> for TestService {
     type Response = serde_json::Value;
     type Error = ResponseError;
-    type Future = Pending<Result<Self::Response, Self::Error>>;
+    type Future = Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, _req: AnyRequest) -> Self::Future {
-        unreachable!()
+    fn call(&mut self, req: AnyRequest) -> Self::Future {
+        let ret = if req.method == SemanticTokensFullRequest::METHOD {
+            Ok(
+                serde_json::to_value(SemanticTokensResult::Tokens(SemanticTokens {
+                    result_id: None,
+                    data: Vec::new(),
+                }))
+                .unwrap(),
+            )
+        } else {
+            Err(ResponseError::new(
+                ErrorCode::METHOD_NOT_FOUND,
+                "method not found",
+            ))
+        };
+        ready(ret)
     }
 }
 
@@ -102,7 +166,7 @@ impl LspService for TestService {
     }
 }
 
-fn gen_lsp_frame(v: serde_json::Value) -> Vec<u8> {
+fn gen_input_frame(v: serde_json::Value) -> Vec<u8> {
     let data = serde_json::to_string(&v).unwrap();
     format!(
         "\
@@ -117,7 +181,6 @@ fn gen_lsp_frame(v: serde_json::Value) -> Vec<u8> {
     .into_bytes()
 }
 
-#[derive(Clone)]
 struct PendingReader;
 
 impl AsyncRead for PendingReader {
@@ -197,5 +260,34 @@ impl AsyncBufRead for RingReader<'_> {
         if self.data.len() == self.pos {
             self.pos = 0;
         }
+    }
+}
+
+struct CounterWriter {
+    limit: u64,
+    client: ClientSocket,
+}
+
+impl AsyncWrite for CounterWriter {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<io::Result<usize>> {
+        if buf.starts_with(b"Content-Length: ") {
+            self.limit -= 1;
+            if self.limit == 0 {
+                self.client.emit(()).unwrap();
+            }
+        }
+        Poll::Ready(Ok(buf.len()))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<io::Result<()>> {
+        Poll::Ready(Ok(()))
     }
 }
