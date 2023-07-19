@@ -8,7 +8,6 @@ use async_lsp::router::Router;
 use async_lsp::tracing::TracingLayer;
 use async_lsp::{LanguageClient, LanguageServer, ResponseError};
 use futures::channel::oneshot;
-use futures::io::BufReader;
 use lsp_types::{
     ClientCapabilities, DidOpenTextDocumentParams, HoverParams, InitializeParams,
     InitializedParams, NumberOrString, Position, ProgressParams, ProgressParamsValue,
@@ -93,11 +92,11 @@ async fn main() {
         .kill_on_drop(true)
         .spawn()
         .expect("Failed run rust-analyzer");
-    let stdout = BufReader::new(child.stdout.unwrap());
+    let stdout = child.stdout.unwrap();
     let stdin = child.stdin.unwrap();
 
     let frontend_fut = tokio::spawn(async move {
-        frontend.run(stdout, stdin).await.unwrap();
+        frontend.run_bufferred(stdout, stdin).await.unwrap();
     });
 
     let root_dir = current_dir()

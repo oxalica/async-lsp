@@ -62,10 +62,11 @@ use std::task::{ready, Context, Poll};
 use std::{fmt, io};
 
 use futures::channel::{mpsc, oneshot};
+use futures::io::BufReader;
 use futures::stream::FuturesUnordered;
 use futures::{
-    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt,
-    FutureExt, SinkExt, StreamExt,
+    pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite,
+    AsyncWriteExt, FutureExt, SinkExt, StreamExt,
 };
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
@@ -503,6 +504,14 @@ impl<S: LspService> Frontend<S> {
 
     /// Drive the service main loop to provide the service.
     ///
+    /// Shortcut to [`Frontend::run`] that accept an `impl AsyncRead` and implicit wrap it in a
+    /// [`BufReader`].
+    pub async fn run_bufferred(self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
+        self.run(BufReader::new(input), output).await
+    }
+
+    /// Drive the service main loop to provide the service.
+    ///
     /// # Errors
     /// - `Error::Io` when the underlying `input` or `output` raises an error.
     /// - `Error::Deserialize` when the peer sends undecodable or invalid message.
@@ -793,6 +802,18 @@ impl AnyEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn _main_loop_future_is_send<S>(
+        f: Frontend<S>,
+        input: impl AsyncBufRead + Send,
+        output: impl AsyncWrite + Send,
+    ) -> impl Send
+    where
+        S: LspService + Send,
+        S::Future: Send,
+    {
+        f.run(input, output)
+    }
 
     #[tokio::test]
     async fn closed_client_socket() {

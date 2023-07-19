@@ -9,7 +9,6 @@ use async_lsp::server::LifecycleLayer;
 use async_lsp::tracing::TracingLayer;
 use async_lsp::{ClientSocket, LanguageClient, LanguageServer, ResponseError};
 use futures::future::BoxFuture;
-use futures::io::BufReader;
 use lsp_types::{
     DidChangeConfigurationParams, GotoDefinitionParams, GotoDefinitionResponse, Hover,
     HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
@@ -139,6 +138,5 @@ async fn main() {
         tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),
     );
 
-    let stdin = BufReader::new(stdin);
-    server.run(stdin, stdout).await.unwrap();
+    server.run_bufferred(stdin, stdout).await.unwrap();
 }

@@ -5,7 +5,6 @@ use std::task::{Context, Poll};
 
 use async_lsp::{AnyEvent, AnyNotification, AnyRequest, Frontend, LspService};
 use async_process::Command;
-use futures::io::BufReader;
 use futures::Future;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use tower_service::Service;
@@ -124,12 +123,11 @@ async fn main() {
 
     let child_stdin = child.stdin.take().unwrap();
     let child_stdout = child.stdout.take().unwrap();
-    let child_stdout = BufReader::new(child_stdout);
-    let main1 = tokio::spawn(mock_client.run(child_stdout, child_stdin));
+    let main1 = tokio::spawn(mock_client.run_bufferred(child_stdout, child_stdin));
 
-    let stdin = BufReader::new(tokio::io::stdin().compat());
+    let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
-    let main2 = tokio::spawn(mock_server.run(stdin, stdout));
+    let main2 = tokio::spawn(mock_server.run_bufferred(stdin, stdout));
 
     let ret = tokio::select! {
         ret = main1 => ret,
