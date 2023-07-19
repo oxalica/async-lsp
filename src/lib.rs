@@ -7,7 +7,7 @@
 //! [tower]: https://github.com/tower-rs/tower
 //!
 //! This project is centered at a core service trait [`LspService`] for either Language Servers or
-//! Language Clients. The main loop driver [`Frontend`] execute the service. The additional
+//! Language Clients. The main loop driver [`MainLoop`] executes the service. The additional
 //! features, called middleware, are pluggable can be layered using the [`tower_layer`]
 //! abstraction. This crate defines several common middlewares for various mandatory or optional
 //! LSP functionalities, see their documentations for details.
@@ -458,7 +458,7 @@ impl Message {
 }
 
 /// Service main loop driver for either Language Servers or Language Clients.
-pub struct Frontend<S: LspService> {
+pub struct MainLoop<S: LspService> {
     service: S,
     rx: mpsc::UnboundedReceiver<MainLoopEvent>,
     outgoing_id: i32,
@@ -472,17 +472,17 @@ enum MainLoopEvent {
     Any(AnyEvent),
 }
 
-define_getters!(impl[S: LspService] Frontend<S>, service: S);
+define_getters!(impl[S: LspService] MainLoop<S>, service: S);
 
-impl<S: LspService> Frontend<S> {
-    /// Create a Language Server `Frontend`.
+impl<S: LspService> MainLoop<S> {
+    /// Create a Language Server main loop.
     #[must_use]
     pub fn new_server(builder: impl FnOnce(ClientSocket) -> S) -> (Self, ClientSocket) {
         let (this, socket) = Self::new(|socket| builder(ClientSocket(socket)));
         (this, ClientSocket(socket))
     }
 
-    /// Create a Language Client `Frontend`.
+    /// Create a Language Client main loop.
     #[must_use]
     pub fn new_client(builder: impl FnOnce(ServerSocket) -> S) -> (Self, ServerSocket) {
         let (this, socket) = Self::new(|socket| builder(ServerSocket(socket)));
@@ -504,7 +504,7 @@ impl<S: LspService> Frontend<S> {
 
     /// Drive the service main loop to provide the service.
     ///
-    /// Shortcut to [`Frontend::run`] that accept an `impl AsyncRead` and implicit wrap it in a
+    /// Shortcut to [`MainLoop::run`] that accept an `impl AsyncRead` and implicit wrap it in a
     /// [`BufReader`].
     pub async fn run_bufferred(self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
         self.run(BufReader::new(input), output).await
@@ -804,7 +804,7 @@ mod tests {
     use super::*;
 
     fn _main_loop_future_is_send<S>(
-        f: Frontend<S>,
+        f: MainLoop<S>,
         input: impl AsyncBufRead + Send,
         output: impl AsyncWrite + Send,
     ) -> impl Send

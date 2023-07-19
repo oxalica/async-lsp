@@ -29,7 +29,7 @@ struct ClientState {
 #[tokio::test(flavor = "current_thread")]
 async fn mock_server_and_client() {
     // The server with handlers.
-    let (server_main, mut client) = async_lsp::Frontend::new_server(|client| {
+    let (server_main, mut client) = async_lsp::MainLoop::new_server(|client| {
         let mut router = Router::new(ServerState { client });
         router
             .request::<request::Initialize, _>(|_st, _params| async move {
@@ -75,7 +75,7 @@ async fn mock_server_and_client() {
 
     // The client with handlers.
     let (msg_tx, mut msg_rx) = mpsc::unbounded();
-    let (client_main, mut server) = async_lsp::Frontend::new_client(|_server| {
+    let (client_main, mut server) = async_lsp::MainLoop::new_client(|_server| {
         let mut router = Router::new(ClientState { msg_tx });
         router
             .notification::<notification::ShowMessage>(|st, params| {

@@ -3,7 +3,7 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::task::{Context, Poll};
 
-use async_lsp::{AnyEvent, AnyNotification, AnyRequest, Frontend, LspService};
+use async_lsp::{AnyEvent, AnyNotification, AnyRequest, LspService, MainLoop};
 use async_process::Command;
 use futures::Future;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -105,14 +105,14 @@ async fn main() {
         .expect("failed to spawn");
 
     // Mock client to communicate with the server. Incoming messages are forwarded to stdin/out.
-    let (mut mock_client, server_socket) = Frontend::new_client(|_| Inspect {
+    let (mut mock_client, server_socket) = MainLoop::new_client(|_| Inspect {
         service: Forward(None),
         incoming: "<",
         outgoing: ">",
     });
 
     // Mock server to communicate with the client. Incoming messages are forwarded to child LSP.
-    let (mock_server, client_socket) = Frontend::new_server(|_| Inspect {
+    let (mock_server, client_socket) = MainLoop::new_server(|_| Inspect {
         service: server_socket,
         incoming: ">",
         outgoing: "<",

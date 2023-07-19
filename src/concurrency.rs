@@ -2,7 +2,7 @@
 //!
 //! *Applies to both Language Servers and Language Clients.*
 //!
-//! Note that the [`Frontend`][crate::Frontend] main loop can poll multiple ongoing requests
+//! Note that the [`crate::MainLoop`] can poll multiple ongoing requests
 //! out-of-box, while this middleware is to provides these additional features:
 //! 1. Limit concurrent incoming requests to at most `max_concurrency`.
 //! 2. Cancellation of incoming requests via client notification `$/cancelRequest`.

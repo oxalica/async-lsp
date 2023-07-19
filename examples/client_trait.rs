@@ -71,7 +71,7 @@ struct Stop;
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let (indexed_tx, indexed_rx) = oneshot::channel();
-    let (frontend, mut server) = async_lsp::Frontend::new_client(|_server| {
+    let (mainloop, mut server) = async_lsp::MainLoop::new_client(|_server| {
         ServiceBuilder::new()
             .layer(TracingLayer::default())
             .layer(CatchUnwindLayer::default())
@@ -95,8 +95,8 @@ async fn main() {
     let stdout = child.stdout.unwrap();
     let stdin = child.stdin.unwrap();
 
-    let frontend_fut = tokio::spawn(async move {
-        frontend.run_bufferred(stdout, stdin).await.unwrap();
+    let mainloop_fut = tokio::spawn(async move {
+        mainloop.run_bufferred(stdout, stdin).await.unwrap();
     });
 
     let root_dir = current_dir()
@@ -158,7 +158,7 @@ async fn main() {
     server.exit(()).unwrap();
 
     server.emit(Stop).unwrap();
-    frontend_fut.await.unwrap();
+    mainloop_fut.await.unwrap();
 }
 
 #[test]
