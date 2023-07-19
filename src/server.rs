@@ -10,11 +10,13 @@
 //!   initialization and shutting down.
 use std::future::{ready, Future, Ready};
 use std::ops::ControlFlow;
+use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use either::Either;
+use futures::future::Either;
 use lsp_types::notification::{self, Notification};
 use lsp_types::request::{self, Request};
+use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -57,14 +59,14 @@ impl<S> Lifecycle<S> {
 impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
     type Response = JsonValue;
     type Error = ResponseError;
-    type Future = Either<S::Future, Ready<<S::Future as Future>::Output>>;
+    type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        match (self.state, &*req.method) {
+        let inner = match (self.state, &*req.method) {
             (State::Uninitialized, request::Initialize::METHOD) => {
                 self.state = State::Initializing;
                 Either::Left(self.service.call(req))
@@ -92,7 +94,8 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                 message: "Server is shutting down".into(),
                 data: None,
             }))),
-        }
+        };
+        ResponseFuture { inner }
     }
 }
 
@@ -120,6 +123,22 @@ impl<S: LspService> LspService for Lifecycle<S> {
 
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
         self.service.emit(event)
+    }
+}
+
+pin_project! {
+    /// The [`Future`] type used by the [`Lifecycle`] middleware.
+    pub struct ResponseFuture<Fut: Future> {
+        #[pin]
+        inner: Either<Fut, Ready<Fut::Output>>,
+    }
+}
+
+impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
+    type Output = Result<JsonValue, ResponseError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        self.project().inner.poll(cx)
     }
 }
 
