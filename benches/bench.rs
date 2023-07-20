@@ -229,14 +229,13 @@ impl AsyncRead for RingReader<'_> {
         _cx: &mut Context<'_>,
         buf: &mut [u8],
     ) -> Poll<io::Result<usize>> {
-        let len = buf.len().min(self.data.len() - self.pos);
-        assert_ne!(len, 0);
-        buf[..len].copy_from_slice(&self.data[self.pos..][..len]);
-        self.pos += len;
-        if self.data.len() == self.pos {
+        let end = self.pos + buf.len();
+        assert!(end <= self.data.len(), "should not read passing messages");
+        buf.copy_from_slice(&self.data[self.pos..end]);
+        if end == self.data.len() {
             self.pos = 0;
         }
-        Poll::Ready(Ok(len))
+        Poll::Ready(Ok(buf.len()))
     }
 
     fn poll_read_vectored(
