@@ -38,7 +38,9 @@ jobs:
       - name: Doc test
         run: cargo hack test --each-feature --doc
       - name: Test
-        run: cargo hack test --each-feature --all-targets -- --include-ignored
+        run: cargo hack test --each-feature --all-targets
+      - name: Test examples
+        run: cargo test --all-features --examples -- --ignored
 
   clippy:
     name: Clippy
