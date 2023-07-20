@@ -762,12 +762,15 @@ impl<T: DeserializeOwned> Future for PeerSocketRequestFuture<T> {
 ///
 /// This is a wrapper of `Box<dyn Any + Send>`, but saves the underlying type name for better
 /// `Debug` impl.
-pub struct AnyEvent(Box<dyn Any + Send>, &'static str);
+pub struct AnyEvent {
+    inner: Box<dyn Any + Send>,
+    type_name: &'static str,
+}
 
 impl fmt::Debug for AnyEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("AnyEvent")
-            .field("type", &self.1)
+            .field("type_name", &self.type_name)
             .finish_non_exhaustive()
     }
 }
@@ -775,13 +778,16 @@ impl fmt::Debug for AnyEvent {
 impl AnyEvent {
     #[must_use]
     fn new<T: Send + 'static>(v: T) -> Self {
-        AnyEvent(Box::new(v), type_name::<T>())
+        AnyEvent {
+            inner: Box::new(v),
+            type_name: type_name::<T>(),
+        }
     }
 
     #[must_use]
     fn inner_type_id(&self) -> TypeId {
         // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
-        Any::type_id(&*self.0)
+        Any::type_id(&*self.inner)
     }
 
     /// Get the underlying type name for debugging purpose.
@@ -789,17 +795,40 @@ impl AnyEvent {
     /// The result string is only meant for debugging. It is not stable and cannot be trusted.
     #[must_use]
     pub fn type_name(&self) -> &'static str {
-        self.1
+        self.type_name
+    }
+
+    /// Returns `true` if the inner type is the same as `T`.
+    #[must_use]
+    pub fn is<T: Send + 'static>(&self) -> bool {
+        self.inner.is::<T>()
+    }
+
+    /// Returns some reference to the inner value if it is of type `T`, or `None` if it isn't.
+    #[must_use]
+    pub fn downcast_ref<T: Send + 'static>(&self) -> Option<&T> {
+        self.inner.downcast_ref::<T>()
+    }
+
+    /// Returns some mutable reference to the inner value if it is of type `T`, or `None` if it
+    /// isn't.
+    #[must_use]
+    pub fn downcast_mut<T: Send + 'static>(&mut self) -> Option<&mut T> {
+        self.inner.downcast_mut::<T>()
     }
 
     /// Attempt to downcast it to a concrete type.
     ///
     /// # Errors
+    ///
     /// Returns `self` if the type mismatches.
     pub fn downcast<T: Send + 'static>(self) -> Result<T, Self> {
-        match self.0.downcast::<T>() {
+        match self.inner.downcast::<T>() {
             Ok(v) => Ok(*v),
-            Err(b) => Err(Self(b, self.1)),
+            Err(inner) => Err(Self {
+                inner,
+                type_name: self.type_name,
+            }),
         }
     }
 }
@@ -846,5 +875,29 @@ mod tests {
             Err(Error::ServiceStopped)
         ));
         assert!(matches!(socket.emit(42i32), Err(Error::ServiceStopped)));
+    }
+
+    #[test]
+    fn any_event() {
+        #[derive(Debug, Clone, PartialEq, Eq)]
+        struct MyEvent<T>(T);
+
+        let event = MyEvent("hello".to_owned());
+        let mut any_event = AnyEvent::new(event.clone());
+        assert!(any_event.type_name().contains("MyEvent"));
+
+        assert!(!any_event.is::<String>());
+        assert!(!any_event.is::<MyEvent<i32>>());
+        assert!(any_event.is::<MyEvent<String>>());
+
+        assert_eq!(any_event.downcast_ref::<i32>(), None);
+        assert_eq!(any_event.downcast_ref::<MyEvent<String>>(), Some(&event));
+
+        assert_eq!(any_event.downcast_mut::<MyEvent<i32>>(), None);
+        any_event.downcast_mut::<MyEvent<String>>().unwrap().0 += " world";
+
+        let any_event = any_event.downcast::<()>().unwrap_err();
+        let inner = any_event.downcast::<MyEvent<String>>().unwrap();
+        assert_eq!(inner.0, "hello world");
     }
 }
