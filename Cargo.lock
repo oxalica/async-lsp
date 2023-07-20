@@ -84,6 +84,7 @@ version = "0.0.4"
 dependencies = [
  "async-io",
  "async-process",
+ "clap",
  "criterion",
  "futures",
  "lsp-types",
