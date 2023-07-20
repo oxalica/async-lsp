@@ -1,5 +1,5 @@
-use std::env::current_dir;
 use std::ops::ControlFlow;
+use std::path::Path;
 use std::process::Stdio;
 
 use async_lsp::concurrency::ConcurrencyLayer;
@@ -9,14 +9,16 @@ use async_lsp::tracing::TracingLayer;
 use async_lsp::{LanguageClient, LanguageServer, ResponseError};
 use futures::channel::oneshot;
 use lsp_types::{
-    ClientCapabilities, DidOpenTextDocumentParams, HoverParams, InitializeParams,
-    InitializedParams, NumberOrString, Position, ProgressParams, ProgressParamsValue,
-    PublishDiagnosticsParams, ShowMessageParams, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, WindowClientCapabilities, WorkDoneProgress,
+    ClientCapabilities, DidOpenTextDocumentParams, HoverContents, HoverParams, InitializeParams,
+    InitializedParams, MarkupContent, NumberOrString, Position, ProgressParams,
+    ProgressParamsValue, PublishDiagnosticsParams, ShowMessageParams, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, WindowClientCapabilities, WorkDoneProgress,
     WorkDoneProgressParams,
 };
 use tower::ServiceBuilder;
 use tracing::{info, Level};
+
+const TEST_ROOT: &str = "tests/client_test_data";
 
 struct ClientState {
     indexed_tx: Option<oneshot::Sender<()>>,
@@ -70,6 +72,10 @@ struct Stop;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let root_dir = Path::new(TEST_ROOT)
+        .canonicalize()
+        .expect("test root should be valid");
+
     let (indexed_tx, indexed_rx) = oneshot::channel();
     let (mainloop, mut server) = async_lsp::MainLoop::new_client(|_server| {
         ServiceBuilder::new()
@@ -86,6 +92,7 @@ async fn main() {
         .init();
 
     let child = async_process::Command::new("rust-analyzer")
+        .current_dir(&root_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -99,12 +106,8 @@ async fn main() {
         mainloop.run_bufferred(stdout, stdin).await.unwrap();
     });
 
-    let root_dir = current_dir()
-        .and_then(|path| path.canonicalize())
-        .expect("Invalid CWD");
-    let root_uri = Url::from_file_path(&root_dir).unwrap();
-
     // Initialize.
+    let root_uri = Url::from_file_path(&root_dir).unwrap();
     let init_ret = server
         .initialize(InitializeParams {
             root_uri: Some(root_uri),
@@ -124,7 +127,7 @@ async fn main() {
 
     // Synchronize documents.
     let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
-    let text = "fn func() { let var = 1; }";
+    let text = "#![no_std] fn func() { let var = 1; }";
     server
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -141,7 +144,7 @@ async fn main() {
 
     // Query.
     let var_pos = text.find("var").unwrap();
-    let hover_ret = server
+    let hover = server
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: file_uri },
@@ -150,8 +153,17 @@ async fn main() {
             work_done_progress_params: WorkDoneProgressParams::default(),
         })
         .await
+        .unwrap()
         .unwrap();
-    info!("Hover result: {hover_ret:?}");
+    info!("Hover result: {hover:?}");
+    assert!(
+        matches!(
+            hover.contents,
+            HoverContents::Markup(MarkupContent { value, .. })
+            if value.contains("let var: i32")
+        ),
+        "should show the type of `var`",
+    );
 
     // Shutdown.
     server.shutdown(()).await.unwrap();
