@@ -21,6 +21,7 @@ use std::ops::ControlFlow;
 use std::task::{Context, Poll};
 
 use lsp_types::request::{self, Request};
+use serde::Deserialize;
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -36,6 +37,12 @@ pub struct ClientProcessMonitor<S> {
     client: ClientSocket,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InitializeParams {
+    process_id: i32,
+}
+
 impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
     type Response = S::Response;
     type Error = S::Error;
@@ -46,16 +53,11 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        if let Some(pid) = (|| -> Option<i32> {
-            (req.method == request::Initialize::METHOD)
-                .then_some(&req.params)?
-                .as_object()?
-                .get("processId")?
-                .as_i64()?
-                .try_into()
-                .ok()
-        })() {
-            match waitpid_any::WaitHandle::open(pid) {
+        if let Some(InitializeParams { process_id }) = (req.method() == request::Initialize::METHOD)
+            .then(|| serde_json::from_str(req.params().get()).ok())
+            .flatten()
+        {
+            match waitpid_any::WaitHandle::open(process_id) {
                 Ok(mut handle) => {
                     let client = self.client.clone();
                     let spawn_ret = std::thread::Builder::new()
@@ -70,7 +72,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                                 Err(err) => {
                                     #[cfg(feature = "tracing")]
                                     ::tracing::error!(
-                                        "Failed to monitor peer process ({pid}): {err:#}"
+                                        "Failed to monitor peer process ({process_id}): {err:#}"
                                     );
                                 }
                             }
@@ -90,7 +92,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
                 #[allow(unused_variables)]
                 Err(err) => {
                     #[cfg(feature = "tracing")]
-                    ::tracing::error!("Failed to monitor peer process {pid}: {err:#}");
+                    ::tracing::error!("Failed to monitor peer process {process_id}: {err:#}");
                 }
             }
         }

@@ -97,8 +97,8 @@ impl Default for TracingBuilder {
     fn default() -> Self {
         Self {
             service_ready: Some(|| info_span!("service_ready")),
-            request: Some(|req| info_span!("request", method = req.method)),
-            notification: Some(|notif| info_span!("notification", method = notif.method)),
+            request: Some(|req| info_span!("request", method = req.method())),
+            notification: Some(|notif| info_span!("notification", method = notif.method())),
             event: Some(|event| info_span!("event", type_name = event.type_name())),
         }
     }

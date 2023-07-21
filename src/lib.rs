@@ -75,7 +75,7 @@ use lsp_types::NumberOrString;
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
-use serde_json::Value as JsonValue;
+use serde_json::value::{RawValue as RawJsonValue, Value as JsonValue};
 use thiserror::Error;
 use tower_service::Service;
 
@@ -304,13 +304,13 @@ impl ErrorCode {
 pub type RequestId = NumberOrString;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct RawMessage<T> {
+struct JsonrpcMessage<T> {
     jsonrpc: RpcVersion,
     #[serde(flatten)]
     inner: T,
 }
 
-impl<T> RawMessage<T> {
+impl<T> JsonrpcMessage<T> {
     fn new(inner: T) -> Self {
         Self {
             jsonrpc: RpcVersion::V2,
@@ -325,7 +325,23 @@ enum RpcVersion {
     V2,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+// TODO: No-copy.
+#[derive(Debug, Clone, Deserialize)]
+struct IncomingMessage {
+    #[allow(unused)]
+    jsonrpc: RpcVersion,
+    id: Option<RequestId>,
+    method: Option<String>,
+    #[serde(default)]
+    params: Box<RawJsonValue>,
+    result: Option<JsonValue>,
+    error: Option<ResponseError>,
+}
+
+// Workaround: Deserialization is done through `IncomingMessage`, since `untagged`'s internal
+// buffering breaks `RawJsonValue`.
+// See: https://github.com/serde-rs/json/issues/497
+#[derive(Debug, Clone, Serialize)]
 #[serde(untagged)]
 enum Message {
     Request(AnyRequest),
@@ -333,35 +349,104 @@ enum Message {
     Notification(AnyNotification),
 }
 
+impl TryFrom<IncomingMessage> for Message {
+    type Error = Error;
+
+    fn try_from(msg: IncomingMessage) -> Result<Self, Self::Error> {
+        Ok(match (msg.method, msg.id) {
+            (Some(method), None) => Self::Notification(AnyNotification {
+                method,
+                params: msg.params,
+            }),
+            (Some(method), Some(id)) => Self::Request(AnyRequest {
+                id,
+                method,
+                params: msg.params,
+            }),
+            (None, Some(id)) => Self::Response(AnyResponse {
+                id,
+                result: msg.result,
+                error: msg.error,
+            }),
+            (None, None) => {
+                return Err(Error::Protocol(
+                    "invalid message without `method` or `id`".into(),
+                ))
+            }
+        })
+    }
+}
+
 /// A dynamic runtime [LSP request](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage).
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 pub struct AnyRequest {
-    /// The request id.
-    pub id: RequestId,
-    /// The method to be invoked.
-    pub method: String,
-    /// The method's params.
+    id: RequestId,
+    method: String,
+    // TODO: No-copy.
     #[serde(default)]
-    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
-    pub params: serde_json::Value,
+    #[serde(skip_serializing_if = "raw_value_is_null")]
+    params: Box<RawJsonValue>,
+}
+
+impl AnyRequest {
+    /// Get the request id.
+    #[must_use]
+    pub fn id(&self) -> &RequestId {
+        &self.id
+    }
+
+    /// Get the method to be invoked.
+    #[must_use]
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Get the method's parameters in raw JSON form.
+    ///
+    /// If there is no parameters, a sentinel value `null` is returned. Note that according to the
+    /// LSP specification, `null` is not a valid value for parameters.
+    /// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage
+    #[must_use]
+    pub fn params(&self) -> &RawJsonValue {
+        &self.params
+    }
 }
 
 /// A dynamic runtime [LSP notification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnyNotification {
     /// The method to be invoked.
-    pub method: String,
+    method: String,
     /// The notification's params.
     #[serde(default)]
-    #[serde(skip_serializing_if = "serde_json::Value::is_null")]
-    pub params: JsonValue,
+    #[serde(skip_serializing_if = "raw_value_is_null")]
+    params: Box<RawJsonValue>,
+}
+
+fn raw_value_is_null(v: &RawJsonValue) -> bool {
+    v.get() == "null"
+}
+
+impl AnyNotification {
+    /// Get the method to be invoked.
+    #[must_use]
+    pub fn method(&self) -> &str {
+        &self.method
+    }
+
+    /// Get the notification's parameters in raw JSON form.
+    ///
+    /// If there is no parameters, a sentinel value `null` is returned. Note that according to the
+    /// LSP specification, `null` is not a valid value for parameters.
+    /// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage
+    #[must_use]
+    pub fn params(&self) -> &RawJsonValue {
+        &self.params
+    }
 }
 
 /// A dynamic runtime response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[non_exhaustive]
 struct AnyResponse {
     id: RequestId,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -442,13 +527,13 @@ impl Message {
         let mut buf = vec![0u8; content_len];
         reader.read_exact(&mut buf).await?;
         #[cfg(feature = "tracing")]
-        ::tracing::trace!(msg = %String::from_utf8_lossy(&buf), "incoming");
-        let msg = serde_json::from_slice::<RawMessage<Self>>(&buf)?;
-        Ok(msg.inner)
+        ::tracing::info!(msg = %String::from_utf8_lossy(&buf), "incoming");
+        let msg = serde_json::from_slice::<IncomingMessage>(&buf)?;
+        msg.try_into()
     }
 
     async fn write(&self, mut writer: impl AsyncWrite + Unpin) -> Result<()> {
-        let buf = serde_json::to_string(&RawMessage::new(self))?;
+        let buf = serde_json::to_string(&JsonrpcMessage::new(self))?;
         #[cfg(feature = "tracing")]
         ::tracing::trace!(msg = %buf, "outgoing");
         writer
@@ -587,13 +672,13 @@ where
             Message::Request(req) => {
                 if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
                     let resp = AnyResponse {
-                        id: req.id,
+                        id: req.id().clone(),
                         result: None,
                         error: Some(err.into()),
                     };
                     return ControlFlow::Continue(Some(Message::Response(resp)));
                 }
-                let id = req.id.clone();
+                let id = req.id().clone();
                 let fut = self.service.call(req);
                 self.tasks.push(RequestFuture { fut, id: Some(id) });
             }
@@ -614,7 +699,7 @@ where
         match event {
             MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
                 req.id = RequestId::Number(self.outgoing_id);
-                assert!(self.outgoing.insert(req.id.clone(), resp_tx).is_none());
+                assert!(self.outgoing.insert(req.id().clone(), resp_tx).is_none());
                 self.outgoing_id += 1;
                 ControlFlow::Continue(Some(Message::Request(req)))
             }
@@ -737,7 +822,7 @@ impl PeerSocket {
         let req = AnyRequest {
             id: RequestId::Number(0),
             method: R::METHOD.into(),
-            params: serde_json::to_value(params).expect("Failed to serialize"),
+            params: serde_json::value::to_raw_value(&params).expect("Failed to serialize"),
         };
         let (tx, rx) = oneshot::channel();
         // If this fails, the oneshot channel will also be closed, and it is handled by
@@ -752,7 +837,7 @@ impl PeerSocket {
     fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
         let notif = AnyNotification {
             method: N::METHOD.into(),
-            params: serde_json::to_value(params).expect("Failed to serialize"),
+            params: serde_json::value::to_raw_value(&params).expect("Failed to serialize"),
         };
         self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
     }

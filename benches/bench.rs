@@ -133,7 +133,7 @@ impl Service<AnyRequest> for TestService {
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        let ret = if req.method == SemanticTokensFullRequest::METHOD {
+        let ret = if req.method() == SemanticTokensFullRequest::METHOD {
             Ok(
                 serde_json::to_value(SemanticTokensResult::Tokens(SemanticTokens {
                     result_id: None,

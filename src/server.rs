@@ -68,7 +68,7 @@ where
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        let inner = match (self.state, &*req.method) {
+        let inner = match (self.state, req.method()) {
             (State::Uninitialized, request::Initialize::METHOD) => {
                 self.state = State::Initializing;
                 Either::Left(self.service.call(req))
@@ -88,7 +88,7 @@ where
             }
             .into()))),
             (State::Ready, _) => {
-                if req.method == request::Shutdown::METHOD {
+                if req.method() == request::Shutdown::METHOD {
                     self.state = State::ShuttingDown;
                 }
                 Either::Left(self.service.call(req))
@@ -109,7 +109,7 @@ where
     S::Error: From<ResponseError>,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        match &*notif.method {
+        match notif.method() {
             notification::Exit::METHOD => {
                 self.service.notify(notif)?;
                 ControlFlow::Break(Ok(()))

@@ -56,18 +56,18 @@ where
             unhandled_req: Box::new(|_, req| {
                 Box::pin(ready(Err(ResponseError {
                     code: ErrorCode::METHOD_NOT_FOUND,
-                    message: format!("No such method {}", req.method),
+                    message: format!("No such method {}", req.method()),
                     data: None,
                 }
                 .into())))
             }),
             unhandled_notif: Box::new(|_, notif| {
-                if notif.method.starts_with("$/") {
+                if notif.method().starts_with("$/") {
                     ControlFlow::Continue(())
                 } else {
                     ControlFlow::Break(Err(crate::Error::Routing(format!(
                         "Unhandled notification: {}",
-                        notif.method,
+                        notif.method(),
                     ))))
                 }
             }),
@@ -91,8 +91,8 @@ where
     {
         self.req_handlers.insert(
             R::METHOD,
-            Box::new(
-                move |state, req| match serde_json::from_value::<R::Params>(req.params) {
+            Box::new(move |state, req| {
+                match serde_json::from_str::<R::Params>(req.params().get()) {
                     Ok(params) => {
                         let fut = handler(state, params);
                         Box::pin(async move {
@@ -105,8 +105,8 @@ where
                         data: None,
                     }
                     .into()))),
-                },
-            ),
+                }
+            }),
         );
         self
     }
@@ -120,12 +120,12 @@ where
     ) -> &mut Self {
         self.notif_handlers.insert(
             N::METHOD,
-            Box::new(
-                move |state, notif| match serde_json::from_value::<N::Params>(notif.params) {
+            Box::new(move |state, notif| {
+                match serde_json::from_str::<N::Params>(notif.params().get()) {
                     Ok(params) => handler(state, params),
                     Err(err) => ControlFlow::Break(Err(err.into())),
-                },
-            ),
+                }
+            }),
         );
         self
     }
@@ -212,7 +212,7 @@ impl<St, Error> Service<AnyRequest> for Router<St, Error> {
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         let h = self
             .req_handlers
-            .get(&*req.method)
+            .get(req.method())
             .unwrap_or(&self.unhandled_req);
         h(&mut self.state, req)
     }
@@ -222,7 +222,7 @@ impl<St> LspService for Router<St> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         let h = self
             .notif_handlers
-            .get(&*notif.method)
+            .get(notif.method())
             .unwrap_or(&self.unhandled_notif);
         h(&mut self.state, notif)
     }

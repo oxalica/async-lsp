@@ -51,7 +51,7 @@ impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        let method = req.method.clone();
+        let method = req.method().to_owned();
         // FIXME: Clarify conditions of UnwindSafe.
         match catch_unwind(AssertUnwindSafe(|| self.service.call(req)))
             .map_err(|err| (self.handler)(&method, err))

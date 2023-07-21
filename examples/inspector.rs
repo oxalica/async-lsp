@@ -55,8 +55,8 @@ where
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        tracing::info!("{} request {}", self.incoming, req.method);
-        let method = req.method.clone();
+        tracing::info!("{} request {}", self.incoming, req.method());
+        let method = req.method().to_owned();
         let fut = self.service.call(req);
         let outgoing = self.outgoing;
         Box::pin(async move {
@@ -77,7 +77,7 @@ where
     S::Future: Send + 'static,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<async_lsp::Result<()>> {
-        tracing::info!("{} notification {}", self.incoming, notif.method);
+        tracing::info!("{} notification {}", self.incoming, notif.method());
         self.service.notify(notif)
     }
 

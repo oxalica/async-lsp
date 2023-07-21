@@ -76,7 +76,7 @@ where
         if self.ongoing.len() >= self.max_concurrency.get() * 2 {
             self.ongoing.retain(|_, handle| !handle.is_aborted());
         }
-        self.ongoing.insert(req.id.clone(), handle.clone());
+        self.ongoing.insert(req.id().clone(), handle.clone());
 
         let fut = self.service.call(req);
         let fut = Abortable::new(fut, registration);
@@ -152,8 +152,10 @@ where
     S::Error: From<ResponseError>,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        if notif.method == notification::Cancel::METHOD {
-            if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {
+        if notif.method() == notification::Cancel::METHOD {
+            if let Ok(params) =
+                serde_json::from_str::<lsp_types::CancelParams>(notif.params().get())
+            {
                 self.ongoing.remove(&params.id);
             }
             return ControlFlow::Continue(());
