@@ -91,9 +91,23 @@ async fn mock_server_and_client() {
     // Wire up a loopback channel between the server and the client.
     let (server_stream, client_stream) = tokio::io::duplex(MEMORY_CHANNEL_SIZE);
     let (server_rx, server_tx) = server_stream.compat().split();
-    let server_main = tokio::spawn(server_main.run_bufferred(server_rx, server_tx));
+    let server_main = tokio::spawn(async move {
+        server_main
+            .run_bufferred(server_rx, server_tx)
+            .await
+            .unwrap();
+    });
     let (client_rx, client_tx) = client_stream.compat().split();
-    let client_main = tokio::spawn(client_main.run_bufferred(client_rx, client_tx));
+    let client_main = tokio::spawn(async move {
+        let err = client_main
+            .run_bufferred(client_rx, client_tx)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, async_lsp::Error::Eof),
+            "should fail due to EOF: {err}"
+        );
+    });
 
     // Send requests to the server on behalf of the client, via `ServerSocket`. It interacts with
     // the client main loop to finalize and send the request through the channel.
@@ -137,15 +151,7 @@ async fn mock_server_and_client() {
     server.shutdown(()).await.unwrap();
     server.exit(()).unwrap();
 
-    // Now the server main loop should stop normaly.
-    server_main.await.expect("no panic").expect("exit normally");
-    // And the client main loop should stop due to EOF.
-    let err = client_main
-        .await
-        .expect("no panic")
-        .expect_err("should fail");
-    assert!(
-        matches!(err, async_lsp::Error::Eof),
-        "should fail due to EOF: {err}"
-    );
+    // Both main loop should be shutdown.
+    server_main.await.expect("no panic");
+    client_main.await.expect("no panic");
 }
