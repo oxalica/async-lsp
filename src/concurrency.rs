@@ -39,9 +39,12 @@ pub struct Concurrency<S> {
 
 define_getters!(impl[S] Concurrency<S>, service: S);
 
-impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
+impl<S: LspService> Service<AnyRequest> for Concurrency<S>
+where
+    S::Error: From<ResponseError>,
+{
     type Response = S::Response;
-    type Error = ResponseError;
+    type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -123,9 +126,10 @@ pin_project! {
     }
 }
 
-impl<Response, Fut> Future for ResponseFuture<Fut>
+impl<Fut, Response, Error> Future for ResponseFuture<Fut>
 where
-    Fut: Future<Output = Result<Response, ResponseError>>,
+    Fut: Future<Output = Result<Response, Error>>,
+    Error: From<ResponseError>,
 {
     type Output = Fut::Output;
 
@@ -137,12 +141,16 @@ where
                 code: ErrorCode::REQUEST_CANCELLED,
                 message: "Client cancelled the request".into(),
                 data: None,
-            })),
+            }
+            .into())),
         }
     }
 }
 
-impl<S: LspService> LspService for Concurrency<S> {
+impl<S: LspService> LspService for Concurrency<S>
+where
+    S::Error: From<ResponseError>,
+{
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         if notif.method == notification::Cancel::METHOD {
             if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {

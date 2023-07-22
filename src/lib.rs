@@ -164,7 +164,7 @@ pub enum Error {
 }
 
 /// The core service abstraction, representing either a Language Server or Language Client.
-pub trait LspService: Service<AnyRequest, Error = ResponseError> {
+pub trait LspService: Service<AnyRequest> {
     /// The handler of [LSP notifications](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
     ///
     /// Notifications are delivered in order and synchronously. This is mandatory since they can
@@ -477,7 +477,11 @@ enum MainLoopEvent {
 
 define_getters!(impl[S: LspService] MainLoop<S>, service: S);
 
-impl<S: LspService<Response = JsonValue>> MainLoop<S> {
+impl<S> MainLoop<S>
+where
+    S: LspService<Response = JsonValue>,
+    ResponseError: From<S::Error>,
+{
     /// Create a Language Server main loop.
     #[must_use]
     pub fn new_server(builder: impl FnOnce(ClientSocket) -> S) -> (Self, ClientSocket) {
@@ -572,7 +576,7 @@ impl<S: LspService<Response = JsonValue>> MainLoop<S> {
                     let resp = AnyResponse {
                         id: req.id,
                         result: None,
-                        error: Some(err),
+                        error: Some(err.into()),
                     };
                     return ControlFlow::Continue(Some(Message::Response(resp)));
                 }
@@ -618,7 +622,11 @@ pin_project! {
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestFuture<Fut> {
+impl<Fut, Error> Future for RequestFuture<Fut>
+where
+    Fut: Future<Output = Result<JsonValue, Error>>,
+    ResponseError: From<Error>,
+{
     type Output = AnyResponse;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -626,7 +634,7 @@ impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for RequestF
         let (mut result, mut error) = (None, None);
         match ready!(this.fut.poll(cx)) {
             Ok(v) => result = Some(v),
-            Err(err) => error = Some(err),
+            Err(err) => error = Some(err.into()),
         }
         Poll::Ready(AnyResponse {
             id: this.id.take().expect("Future is consumed"),
@@ -847,6 +855,8 @@ mod tests {
     where
         S: LspService<Response = JsonValue> + Send,
         S::Future: Send,
+        S::Error: From<Error> + Send,
+        ResponseError: From<S::Error>,
     {
         f.run(input, output)
     }

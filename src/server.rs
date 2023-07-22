@@ -55,9 +55,12 @@ impl<S> Lifecycle<S> {
     }
 }
 
-impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
+impl<S: LspService> Service<AnyRequest> for Lifecycle<S>
+where
+    S::Error: From<ResponseError>,
+{
     type Response = S::Response;
-    type Error = ResponseError;
+    type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -75,13 +78,15 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                     code: ErrorCode::SERVER_NOT_INITIALIZED,
                     message: "Server is not initialized yet".into(),
                     data: None,
-                })))
+                }
+                .into())))
             }
             (_, request::Initialize::METHOD) => Either::Right(ready(Err(ResponseError {
                 code: ErrorCode::INVALID_REQUEST,
                 message: "Server is already initialized".into(),
                 data: None,
-            }))),
+            }
+            .into()))),
             (State::Ready, _) => {
                 if req.method == request::Shutdown::METHOD {
                     self.state = State::ShuttingDown;
@@ -92,13 +97,17 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                 code: ErrorCode::INVALID_REQUEST,
                 message: "Server is shutting down".into(),
                 data: None,
-            }))),
+            }
+            .into()))),
         };
         ResponseFuture { inner }
     }
 }
 
-impl<S: LspService> LspService for Lifecycle<S> {
+impl<S: LspService> LspService for Lifecycle<S>
+where
+    S::Error: From<ResponseError>,
+{
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         match &*notif.method {
             notification::Exit::METHOD => {

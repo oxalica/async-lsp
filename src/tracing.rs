@@ -19,7 +19,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 use tracing::{info_span, Span};
 
-use crate::{AnyEvent, AnyNotification, AnyRequest, LspService, ResponseError, Result};
+use crate::{AnyEvent, AnyNotification, AnyRequest, LspService, Result};
 
 /// The middleware attaching [`tracing::Span`]s over underlying handlers.
 ///
@@ -34,7 +34,7 @@ define_getters!(impl[S] Tracing<S>, service: S);
 
 impl<S: LspService> Service<AnyRequest> for Tracing<S> {
     type Response = S::Response;
-    type Error = ResponseError;
+    type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
