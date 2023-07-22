@@ -8,12 +8,13 @@ use futures::FutureExt;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, AnyResponse, ClientSocket, ErrorCode, LspService,
-    MainLoopEvent, Message, PeerSocket, ResponseError, Result, ServerSocket,
+    AnyEvent, AnyNotification, AnyRequest, ClientSocket, ErrorCode, HalfRequestFrame, LspService,
+    MainLoopEvent, MessageFrame, PeerSocket, RawNotification, RawResponse, ResponseError, Result,
+    ServerSocket,
 };
 
 pub struct PeerSocketResponseFuture {
-    rx: oneshot::Receiver<AnyResponse>,
+    rx: oneshot::Receiver<RawResponse>,
 }
 
 impl Future for PeerSocketResponseFuture {
@@ -37,12 +38,17 @@ impl Future for PeerSocketResponseFuture {
 impl PeerSocket {
     fn on_call(&mut self, req: AnyRequest) -> PeerSocketResponseFuture {
         let (tx, rx) = oneshot::channel();
-        let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(req, tx));
+        let half_frame = HalfRequestFrame::new(req.method(), req.params());
+        let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(half_frame, tx));
         PeerSocketResponseFuture { rx }
     }
 
     fn on_notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        match self.send(MainLoopEvent::Outgoing(Message::Notification(notif))) {
+        let out = MessageFrame::new(&RawNotification {
+            method: notif.method(),
+            params: notif.params(),
+        });
+        match self.send(MainLoopEvent::OutgoingNotification(out)) {
             Ok(()) => ControlFlow::Continue(()),
             Err(err) => ControlFlow::Break(Err(err)),
         }

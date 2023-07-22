@@ -303,14 +303,14 @@ impl ErrorCode {
 /// for valid communication.
 pub type RequestId = NumberOrString;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-struct JsonrpcMessage<T> {
+#[derive(Serialize)]
+struct RawJsonrpc<T> {
     jsonrpc: RpcVersion,
     #[serde(flatten)]
     inner: T,
 }
 
-impl<T> JsonrpcMessage<T> {
+impl<T> RawJsonrpc<T> {
     fn new(inner: T) -> Self {
         Self {
             jsonrpc: RpcVersion::V2,
@@ -323,6 +323,30 @@ impl<T> JsonrpcMessage<T> {
 enum RpcVersion {
     #[serde(rename = "2.0")]
     V2,
+}
+
+// TODO: Unify these structs?
+#[derive(Serialize)]
+struct RawNotification<M, P> {
+    method: M,
+    params: P,
+}
+
+#[derive(Serialize)]
+struct RawRequest<'a, S: ?Sized> {
+    id: i32,
+    method: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    params: Option<&'a S>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RawResponse {
+    id: RequestId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<ResponseError>,
 }
 
 // TODO: No-copy.
@@ -341,11 +365,10 @@ struct IncomingMessage {
 // Workaround: Deserialization is done through `IncomingMessage`, since `untagged`'s internal
 // buffering breaks `RawJsonValue`.
 // See: https://github.com/serde-rs/json/issues/497
-#[derive(Debug, Clone, Serialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone)]
 enum Message {
     Request(AnyRequest),
-    Response(AnyResponse),
+    Response(RawResponse),
     Notification(AnyNotification),
 }
 
@@ -363,7 +386,7 @@ impl TryFrom<IncomingMessage> for Message {
                 method,
                 params: msg.params,
             }),
-            (None, Some(id)) => Self::Response(AnyResponse {
+            (None, Some(id)) => Self::Response(RawResponse {
                 id,
                 result: msg.result,
                 error: msg.error,
@@ -378,13 +401,11 @@ impl TryFrom<IncomingMessage> for Message {
 }
 
 /// A dynamic runtime [LSP request](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AnyRequest {
     id: RequestId,
     method: String,
     // TODO: No-copy.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "raw_value_is_null")]
     params: Box<RawJsonValue>,
 }
 
@@ -413,18 +434,12 @@ impl AnyRequest {
 }
 
 /// A dynamic runtime [LSP notification](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct AnyNotification {
     /// The method to be invoked.
     method: String,
     /// The notification's params.
-    #[serde(default)]
-    #[serde(skip_serializing_if = "raw_value_is_null")]
     params: Box<RawJsonValue>,
-}
-
-fn raw_value_is_null(v: &RawJsonValue) -> bool {
-    v.get() == "null"
 }
 
 impl AnyNotification {
@@ -443,16 +458,6 @@ impl AnyNotification {
     pub fn params(&self) -> &RawJsonValue {
         &self.params
     }
-}
-
-/// A dynamic runtime response.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct AnyResponse {
-    id: RequestId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<JsonValue>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    error: Option<ResponseError>,
 }
 
 /// The error object in case a request fails.
@@ -494,9 +499,13 @@ impl ResponseError {
     }
 }
 
-impl Message {
-    const CONTENT_LENGTH: &'static str = "Content-Length";
+macro_rules! CONTENT_LENGTH {
+    () => {
+        "Content-Length"
+    };
+}
 
+impl Message {
     async fn read(mut reader: impl AsyncBufRead + Unpin) -> Result<Self> {
         let mut line = String::new();
         let mut content_len = None;
@@ -515,7 +524,7 @@ impl Message {
                 .strip_suffix("\r\n")
                 .and_then(|line| line.split_once(": "))
                 .ok_or_else(|| Error::Protocol(format!("Invalid header: {line:?}")))?;
-            if name.eq_ignore_ascii_case(Self::CONTENT_LENGTH) {
+            if name.eq_ignore_ascii_case(CONTENT_LENGTH!()) {
                 let value = value
                     .parse::<usize>()
                     .map_err(|_| Error::Protocol(format!("Invalid content-length: {value}")))?;
@@ -531,17 +540,79 @@ impl Message {
         let msg = serde_json::from_slice::<IncomingMessage>(&buf)?;
         msg.try_into()
     }
+}
+
+/// Serialized bytes of an outgoing message with header.
+struct MessageFrame {
+    buf: Vec<u8>,
+    start: usize,
+}
+
+impl MessageFrame {
+    // Content-length has type `number`, which is defined to be `i32` and must >= 0.
+    // Thus it consists of at most 10 digits.
+    const HEADER: &str = concat!(CONTENT_LENGTH!(), ": 1234567890\r\n\r\n");
+    const MAX_LEN_DIGITS: usize = 10;
+
+    fn new(value: &impl Serialize) -> Self {
+        use std::io::Write;
+
+        let mut buf = Vec::with_capacity(128);
+        buf.extend_from_slice(Self::HEADER.as_bytes());
+        serde_json::to_writer(&mut buf, &RawJsonrpc::new(value)).expect("failed to serialize");
+
+        let len = buf.len() - Self::HEADER.len();
+        let len = i32::try_from(len).expect("message length must not exceed i32::MAX");
+        let start = Self::MAX_LEN_DIGITS - (1 + len.max(1).ilog10() as usize);
+        let mut len_buf = &mut buf[start..Self::HEADER.len()];
+        write!(len_buf, concat!(CONTENT_LENGTH!(), ": {}"), len).unwrap();
+        Self { buf, start }
+    }
+
+    fn data(&self) -> &[u8] {
+        &self.buf[self.start..]
+    }
 
     async fn write(&self, mut writer: impl AsyncWrite + Unpin) -> Result<()> {
-        let buf = serde_json::to_string(&JsonrpcMessage::new(self))?;
         #[cfg(feature = "tracing")]
-        ::tracing::trace!(msg = %buf, "outgoing");
-        writer
-            .write_all(format!("{}: {}\r\n\r\n", Self::CONTENT_LENGTH, buf.len()).as_bytes())
-            .await?;
-        writer.write_all(buf.as_bytes()).await?;
+        ::tracing::trace!(msg = &*String::from_utf8_lossy(self.data()), "outgoing");
+        writer.write_all(self.data()).await?;
         writer.flush().await?;
         Ok(())
+    }
+}
+
+/// Request frame with unfilled `id`.
+struct HalfRequestFrame(MessageFrame);
+
+impl HalfRequestFrame {
+    const ID_OFFSET: usize = MessageFrame::HEADER.len() + r#"{"jsonrpc":"2.0","id":"#.len();
+    const PLACEHOLDER_ID: i32 = i32::MIN;
+    const ID_LEN: usize = 1 + 10; // `-`
+
+    fn new<T: Serialize + ?Sized + 'static>(method: &str, params: &T) -> Self {
+        let frame = MessageFrame::new(&RawRequest {
+            id: Self::PLACEHOLDER_ID,
+            method,
+            // XXX: Special case to skip `()` as request parameter.
+            // `null` is not a valid `params` value.
+            params: (TypeId::of::<T>() != TypeId::of::<()>()).then_some(params),
+        });
+        debug_assert_eq!(
+            &frame.buf[Self::ID_OFFSET..Self::ID_OFFSET + Self::ID_LEN],
+            format!("{}", Self::PLACEHOLDER_ID).as_bytes(),
+            "{}",
+            String::from_utf8_lossy(&frame.buf),
+        );
+        Self(frame)
+    }
+
+    fn finish(mut self, id: i32) -> MessageFrame {
+        use std::io::Write;
+
+        let mut len_buf = &mut self.0.buf[Self::ID_OFFSET..Self::ID_OFFSET + Self::ID_LEN];
+        write!(len_buf, "{id:width$}", width = Self::ID_LEN).unwrap();
+        self.0
     }
 }
 
@@ -550,13 +621,13 @@ pub struct MainLoop<S: LspService> {
     service: S,
     rx: mpsc::UnboundedReceiver<MainLoopEvent>,
     outgoing_id: i32,
-    outgoing: HashMap<RequestId, oneshot::Sender<AnyResponse>>,
+    outgoing: HashMap<i32, oneshot::Sender<RawResponse>>,
     tasks: FuturesUnordered<RequestFuture<S::Future>>,
 }
 
 enum MainLoopEvent {
-    Outgoing(Message),
-    OutgoingRequest(AnyRequest, oneshot::Sender<AnyResponse>),
+    OutgoingNotification(MessageFrame),
+    OutgoingRequest(HalfRequestFrame, oneshot::Sender<RawResponse>),
     Any(AnyEvent),
 }
 
@@ -617,8 +688,10 @@ where
         let incoming = futures::stream::unfold(input, |mut input| async move {
             Some((Message::read(&mut input).await, input))
         });
-        let outgoing = futures::sink::unfold(output, |mut output, msg| async move {
-            Message::write(&msg, &mut output).await.map(|()| output)
+        let outgoing = futures::sink::unfold(output, |mut output, frame| async move {
+            MessageFrame::write(&frame, &mut output)
+                .await
+                .map(|()| output)
         });
         pin_mut!(incoming, outgoing);
 
@@ -631,7 +704,7 @@ where
                 // Concurrently flush out the previous message.
                 ret = flush_fut => { ret?; continue; }
 
-                resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
+                out = self.tasks.select_next_some() => ControlFlow::Continue(Some(out)),
                 event = self.rx.next() => self.dispatch_event(event.expect("Sender is alive")),
                 msg = incoming.next() => {
                     let dispatch_fut = self.dispatch_message(msg.expect("Never ends")?).fuse();
@@ -649,13 +722,13 @@ where
                     }
                 }
             };
-            let msg = match ctl {
-                ControlFlow::Continue(Some(msg)) => msg,
+            let out = match ctl {
+                ControlFlow::Continue(Some(out)) => out,
                 ControlFlow::Continue(None) => continue,
                 ControlFlow::Break(ret) => break ret,
             };
             // Flush the previous one and load a new message to send.
-            outgoing.feed(msg).await?;
+            outgoing.feed(out).await?;
             flush_fut = outgoing.flush().fuse();
         };
 
@@ -667,25 +740,34 @@ where
         ret.and(flush_ret)
     }
 
-    async fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
+    async fn dispatch_message(
+        &mut self,
+        msg: Message,
+    ) -> ControlFlow<Result<()>, Option<MessageFrame>> {
         match msg {
             Message::Request(req) => {
                 if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
-                    let resp = AnyResponse {
+                    let frame = MessageFrame::new(&RawResponse {
                         id: req.id().clone(),
                         result: None,
                         error: Some(err.into()),
-                    };
-                    return ControlFlow::Continue(Some(Message::Response(resp)));
+                    });
+                    return ControlFlow::Continue(Some(frame));
                 }
                 let id = req.id().clone();
                 let fut = self.service.call(req);
                 self.tasks.push(RequestFuture { fut, id: Some(id) });
             }
             Message::Response(resp) => {
-                if let Some(resp_tx) = self.outgoing.remove(&resp.id) {
+                if let Some(resp_tx) = match &resp.id {
+                    NumberOrString::Number(id) => self.outgoing.remove(id),
+                    NumberOrString::String(_) => None,
+                } {
                     // The result may be ignored.
                     let _: Result<_, _> = resp_tx.send(resp);
+                } else {
+                    #[cfg(feature = "tracing")]
+                    ::tracing::warn!(?resp, "ignored unknow response");
                 }
             }
             Message::Notification(notif) => {
@@ -695,15 +777,18 @@ where
         ControlFlow::Continue(None)
     }
 
-    fn dispatch_event(&mut self, event: MainLoopEvent) -> ControlFlow<Result<()>, Option<Message>> {
+    fn dispatch_event(
+        &mut self,
+        event: MainLoopEvent,
+    ) -> ControlFlow<Result<()>, Option<MessageFrame>> {
         match event {
-            MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
-                req.id = RequestId::Number(self.outgoing_id);
-                assert!(self.outgoing.insert(req.id().clone(), resp_tx).is_none());
+            MainLoopEvent::OutgoingRequest(half_frame, callback) => {
+                let frame = half_frame.finish(self.outgoing_id);
+                assert!(self.outgoing.insert(self.outgoing_id, callback).is_none());
                 self.outgoing_id += 1;
-                ControlFlow::Continue(Some(Message::Request(req)))
+                ControlFlow::Continue(Some(frame))
             }
-            MainLoopEvent::Outgoing(msg) => ControlFlow::Continue(Some(msg)),
+            MainLoopEvent::OutgoingNotification(raw) => ControlFlow::Continue(Some(raw)),
             MainLoopEvent::Any(event) => {
                 self.service.emit(event)?;
                 ControlFlow::Continue(None)
@@ -725,20 +810,20 @@ where
     Fut: Future<Output = Result<JsonValue, Error>>,
     ResponseError: From<Error>,
 {
-    type Output = AnyResponse;
+    type Output = MessageFrame;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
-        let (mut result, mut error) = (None, None);
-        match ready!(this.fut.poll(cx)) {
-            Ok(v) => result = Some(v),
-            Err(err) => error = Some(err.into()),
-        }
-        Poll::Ready(AnyResponse {
+        let (result, error) = match ready!(this.fut.poll(cx)) {
+            Ok(v) => (Some(v), None),
+            Err(err) => (None, Some(err.into())),
+        };
+        let frame = MessageFrame::new(&RawResponse {
             id: this.id.take().expect("Future is consumed"),
             result,
             error,
-        })
+        });
+        Poll::Ready(frame)
     }
 }
 
@@ -764,7 +849,10 @@ macro_rules! impl_socket_wrapper {
             /// # Errors
             /// - [`Error::ServiceStopped`] when the service main loop stopped.
             /// - [`Error::Response`] when the peer replies an error.
-            pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result> {
+            pub async fn request<R: Request>(&self, params: R::Params) -> Result<R::Result>
+            where
+                R::Params: 'static,
+            {
                 self.0.request::<R>(params).await
             }
 
@@ -775,7 +863,10 @@ macro_rules! impl_socket_wrapper {
             ///
             /// # Errors
             /// - [`Error::ServiceStopped`] when the service main loop stopped.
-            pub fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
+            pub fn notify<N: Notification>(&self, params: N::Params) -> Result<()>
+            where
+                N::Params: 'static,
+            {
                 self.0.notify::<N>(params)
             }
 
@@ -818,28 +909,30 @@ impl PeerSocket {
         self.tx.unbounded_send(v).map_err(|_| Error::ServiceStopped)
     }
 
-    fn request<R: Request>(&self, params: R::Params) -> PeerSocketRequestFuture<R::Result> {
-        let req = AnyRequest {
-            id: RequestId::Number(0),
-            method: R::METHOD.into(),
-            params: serde_json::value::to_raw_value(&params).expect("Failed to serialize"),
-        };
+    fn request<R: Request>(&self, params: R::Params) -> PeerSocketRequestFuture<R::Result>
+    where
+        R::Params: 'static,
+    {
+        let half_frame = HalfRequestFrame::new(R::METHOD, &params);
         let (tx, rx) = oneshot::channel();
-        // If this fails, the oneshot channel will also be closed, and it is handled by
+        // If sending fails, the oneshot channel will also be closed, and it is handled by
         // `PeerSocketRequestFuture`.
-        let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(req, tx));
+        let _: Result<_, _> = self.send(MainLoopEvent::OutgoingRequest(half_frame, tx));
         PeerSocketRequestFuture {
             rx,
             _marker: PhantomData,
         }
     }
 
-    fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
-        let notif = AnyNotification {
-            method: N::METHOD.into(),
-            params: serde_json::value::to_raw_value(&params).expect("Failed to serialize"),
-        };
-        self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
+    fn notify<N: Notification>(&self, params: N::Params) -> Result<()>
+    where
+        N::Params: 'static,
+    {
+        let frame = MessageFrame::new(&RawNotification {
+            method: N::METHOD,
+            params,
+        });
+        self.send(MainLoopEvent::OutgoingNotification(frame))
     }
 
     pub fn emit<E: Send + 'static>(&self, event: E) -> Result<()> {
@@ -848,7 +941,7 @@ impl PeerSocket {
 }
 
 struct PeerSocketRequestFuture<T> {
-    rx: oneshot::Receiver<AnyResponse>,
+    rx: oneshot::Receiver<RawResponse>,
     _marker: PhantomData<fn() -> T>,
 }
 
@@ -1009,5 +1102,56 @@ mod tests {
         let any_event = any_event.downcast::<()>().unwrap_err();
         let inner = any_event.downcast::<MyEvent<String>>().unwrap();
         assert_eq!(inner.0, "hello world");
+    }
+
+    impl MessageFrame {
+        fn data_str(&self) -> &str {
+            std::str::from_utf8(self.data()).unwrap()
+        }
+    }
+
+    #[derive(Serialize)]
+    struct Foo {
+        foo: &'static str,
+        bar: i32,
+    }
+
+    #[test]
+    fn serialize_frame() {
+        assert_eq!(
+            MessageFrame::new(&Foo {
+                foo: "bar",
+                bar: 42,
+            })
+            .data_str(),
+            "Content-Length: 38\r\n\r\n{\"jsonrpc\":\"2.0\",\"foo\":\"bar\",\"bar\":42}",
+        );
+
+        assert_eq!(
+            MessageFrame::new(&Foo {
+                foo: "this is a long string making content length two digits..",
+                bar: i32::MIN,
+            })
+            .data_str(),
+            "Content-Length: 100\r\n\r\n{\"jsonrpc\":\"2.0\",\"foo\":\"this is a long string making content length two digits..\",\"bar\":-2147483648}",
+        );
+    }
+
+    #[test]
+    fn serialize_request_simple() {
+        let frame = HalfRequestFrame::new("method", &42).finish(626);
+        assert_eq!(
+            frame.data_str(),
+            "Content-Length: 64\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":        626,\"method\":\"method\",\"params\":42}",
+        );
+    }
+
+    #[test]
+    fn serialize_request_empty() {
+        let frame = HalfRequestFrame::new("shutdown", &()).finish(i32::MIN);
+        assert_eq!(
+            frame.data_str(),
+            "Content-Length: 54\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":-2147483648,\"method\":\"shutdown\"}"
+        );
     }
 }

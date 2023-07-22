@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        rust: [nightly, beta, stable, "1.64"] # Sync with Cargo.toml.
+        rust: [nightly, beta, stable, "1.67"] # Sync with Cargo.toml.
         os: [ubuntu-latest, macos-latest, windows-latest]
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

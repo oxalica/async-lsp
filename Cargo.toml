@@ -8,9 +8,8 @@ categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 # Required features:
-# - std::future::poll_fn
-# - std::task::ready!
-rust-version = "1.64" # Sync with CI!
+# - i32::ilog10
+rust-version = "1.67" # Sync with CI!
 include = [
     "/Cargo.toml",
     "/LICENSE-APACHE",
