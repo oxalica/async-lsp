@@ -350,9 +350,12 @@ struct RawResponse {
     error: Option<ResponseError>,
 }
 
+// Workaround: Deserialization is done through `IncomingMessage`, since `untagged`'s internal
+// buffering breaks `RawJsonValue`.
+// See: https://github.com/serde-rs/json/issues/497
 // TODO: No-copy.
 #[derive(Debug, Clone, Deserialize)]
-struct IncomingMessage {
+struct RawIncomingMessage {
     #[allow(unused)]
     jsonrpc: RpcVersion,
     id: Option<RequestId>,
@@ -362,20 +365,21 @@ struct IncomingMessage {
     error: Option<ResponseError>,
 }
 
-// Workaround: Deserialization is done through `IncomingMessage`, since `untagged`'s internal
-// buffering breaks `RawJsonValue`.
-// See: https://github.com/serde-rs/json/issues/497
 #[derive(Debug, Clone)]
-enum Message {
+enum IncomingMessage {
     Request(AnyRequest),
     Response(RawResponse),
     Notification(AnyNotification),
 }
 
-impl TryFrom<IncomingMessage> for Message {
-    type Error = Error;
+impl<'de> Deserialize<'de> for IncomingMessage {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error;
 
-    fn try_from(msg: IncomingMessage) -> Result<Self, Self::Error> {
+        let msg = RawIncomingMessage::deserialize(deserializer)?;
         Ok(match (msg.method, msg.id) {
             (Some(method), None) => Self::Notification(AnyNotification {
                 method,
@@ -392,9 +396,7 @@ impl TryFrom<IncomingMessage> for Message {
                 error: msg.error,
             }),
             (None, None) => {
-                return Err(Error::Protocol(
-                    "invalid message without `method` or `id`".into(),
-                ))
+                return Err(D::Error::custom("invalid message without `method` or `id`"))
             }
         })
     }
@@ -508,7 +510,7 @@ macro_rules! CONTENT_LENGTH {
     };
 }
 
-impl Message {
+impl IncomingMessage {
     async fn read(mut reader: impl AsyncBufRead + Unpin) -> Result<Self> {
         let mut line = String::new();
         let mut content_len = None;
@@ -540,8 +542,7 @@ impl Message {
         reader.read_exact(&mut buf).await?;
         #[cfg(feature = "tracing")]
         ::tracing::info!(msg = %String::from_utf8_lossy(&buf), "incoming");
-        let msg = serde_json::from_slice::<IncomingMessage>(&buf)?;
-        msg.try_into()
+        Ok(serde_json::from_slice::<IncomingMessage>(&buf)?)
     }
 }
 
@@ -689,7 +690,7 @@ where
     pub async fn run(mut self, input: impl AsyncBufRead, output: impl AsyncWrite) -> Result<()> {
         pin_mut!(input, output);
         let incoming = futures::stream::unfold(input, |mut input| async move {
-            Some((Message::read(&mut input).await, input))
+            Some((IncomingMessage::read(&mut input).await, input))
         });
         let outgoing = futures::sink::unfold(output, |mut output, frame| async move {
             MessageFrame::write(&frame, &mut output)
@@ -745,10 +746,10 @@ where
 
     async fn dispatch_message(
         &mut self,
-        msg: Message,
+        msg: IncomingMessage,
     ) -> ControlFlow<Result<()>, Option<MessageFrame>> {
         match msg {
-            Message::Request(req) => {
+            IncomingMessage::Request(req) => {
                 if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
                     let frame = MessageFrame::new(&RawResponse {
                         id: req.id().clone(),
@@ -761,7 +762,7 @@ where
                 let fut = self.service.call(req);
                 self.tasks.push(RequestFuture { fut, id: Some(id) });
             }
-            Message::Response(resp) => {
+            IncomingMessage::Response(resp) => {
                 if let Some(resp_tx) = match &resp.id {
                     NumberOrString::Number(id) => self.outgoing.remove(id),
                     NumberOrString::String(_) => None,
@@ -773,7 +774,7 @@ where
                     ::tracing::warn!(?resp, "ignored unknow response");
                 }
             }
-            Message::Notification(notif) => {
+            IncomingMessage::Notification(notif) => {
                 self.service.notify(notif)?;
             }
         }
