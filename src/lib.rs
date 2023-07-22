@@ -164,7 +164,7 @@ pub enum Error {
 }
 
 /// The core service abstraction, representing either a Language Server or Language Client.
-pub trait LspService: Service<AnyRequest, Response = JsonValue, Error = ResponseError> {
+pub trait LspService: Service<AnyRequest, Error = ResponseError> {
     /// The handler of [LSP notifications](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage).
     ///
     /// Notifications are delivered in order and synchronously. This is mandatory since they can
@@ -477,7 +477,7 @@ enum MainLoopEvent {
 
 define_getters!(impl[S: LspService] MainLoop<S>, service: S);
 
-impl<S: LspService> MainLoop<S> {
+impl<S: LspService<Response = JsonValue>> MainLoop<S> {
     /// Create a Language Server main loop.
     #[must_use]
     pub fn new_server(builder: impl FnOnce(ClientSocket) -> S) -> (Self, ClientSocket) {
@@ -845,7 +845,7 @@ mod tests {
         output: impl AsyncWrite + Send,
     ) -> impl Send
     where
-        S: LspService + Send,
+        S: LspService<Response = JsonValue> + Send,
         S::Future: Send,
     {
         f.run(input, output)

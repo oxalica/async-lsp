@@ -25,8 +25,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, ClientSocket, Error, JsonValue, LspService,
-    ResponseError, Result,
+    AnyEvent, AnyNotification, AnyRequest, ClientSocket, Error, LspService, ResponseError, Result,
 };
 
 struct ClientProcessExited;
@@ -40,7 +39,7 @@ pub struct ClientProcessMonitor<S> {
 }
 
 impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
-    type Response = JsonValue;
+    type Response = S::Response;
     type Error = ResponseError;
     type Future = S::Future;
 

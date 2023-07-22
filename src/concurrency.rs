@@ -23,8 +23,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, RequestId,
-    ResponseError, Result,
+    AnyEvent, AnyNotification, AnyRequest, ErrorCode, LspService, RequestId, ResponseError, Result,
 };
 
 /// The middleware for incoming request multiplexing limits and cancellation.
@@ -41,7 +40,7 @@ pub struct Concurrency<S> {
 define_getters!(impl[S] Concurrency<S>, service: S);
 
 impl<S: LspService> Service<AnyRequest> for Concurrency<S> {
-    type Response = JsonValue;
+    type Response = S::Response;
     type Error = ResponseError;
     type Future = ResponseFuture<S::Future>;
 
@@ -124,7 +123,10 @@ pin_project! {
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
+impl<Response, Fut> Future for ResponseFuture<Fut>
+where
+    Fut: Future<Output = Result<Response, ResponseError>>,
+{
     type Output = Fut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {

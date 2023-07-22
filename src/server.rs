@@ -21,8 +21,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, JsonValue, LspService, ResponseError,
-    Result,
+    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, LspService, ResponseError, Result,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -57,7 +56,7 @@ impl<S> Lifecycle<S> {
 }
 
 impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
-    type Response = JsonValue;
+    type Response = S::Response;
     type Error = ResponseError;
     type Future = ResponseFuture<S::Future>;
 
@@ -134,8 +133,8 @@ pin_project! {
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
-    type Output = Result<JsonValue, ResponseError>;
+impl<Fut: Future> Future for ResponseFuture<Fut> {
+    type Output = Fut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.project().inner.poll(cx)

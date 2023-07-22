@@ -12,9 +12,7 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{
-    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
-};
+use crate::{AnyEvent, AnyNotification, AnyRequest, ErrorCode, LspService, ResponseError, Result};
 
 /// The middleware catching panics of underlying handlers and turn them into error responses.
 ///
@@ -44,7 +42,7 @@ fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError 
 }
 
 impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
-    type Response = JsonValue;
+    type Response = S::Response;
     type Error = ResponseError;
     type Future = ResponseFuture<S::Future>;
 
@@ -95,7 +93,10 @@ pin_project! {
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
+impl<Response, Fut> Future for ResponseFuture<Fut>
+where
+    Fut: Future<Output = Result<Response, ResponseError>>,
+{
     type Output = Fut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
