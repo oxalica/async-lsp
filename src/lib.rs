@@ -479,7 +479,8 @@ pub struct ResponseError {
     pub message: String,
     /// A primitive or structured value that contains additional
     /// information about the error. Can be omitted.
-    pub data: Option<JsonValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Box<RawJsonValue>>,
 }
 
 impl ResponseError {
@@ -495,11 +496,15 @@ impl ResponseError {
 
     /// Create a new error object with a JSON-RPC error code, a message, and any additional data.
     #[must_use]
-    pub fn new_with_data(code: ErrorCode, message: impl fmt::Display, data: JsonValue) -> Self {
+    pub fn new_with_data(
+        code: ErrorCode,
+        message: impl fmt::Display,
+        data: &impl Serialize,
+    ) -> Self {
         Self {
             code,
             message: message.to_string(),
-            data: Some(data),
+            data: Some(serde_json::value::to_raw_value(&data).expect("failed to serialize")),
         }
     }
 }
