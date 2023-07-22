@@ -72,6 +72,7 @@ use futures::{
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use lsp_types::NumberOrString;
+use once_cell::sync::Lazy;
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -356,8 +357,7 @@ struct IncomingMessage {
     jsonrpc: RpcVersion,
     id: Option<RequestId>,
     method: Option<String>,
-    #[serde(default)]
-    params: Box<RawJsonValue>,
+    params: Option<Box<RawJsonValue>>,
     result: Option<JsonValue>,
     error: Option<ResponseError>,
 }
@@ -400,13 +400,16 @@ impl TryFrom<IncomingMessage> for Message {
     }
 }
 
+static NULL_VALUE: Lazy<&'static RawJsonValue> =
+    Lazy::new(|| serde_json::from_str("null").unwrap());
+
 /// A dynamic runtime [LSP request](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage).
 #[derive(Debug, Clone)]
 pub struct AnyRequest {
     id: RequestId,
     method: String,
     // TODO: No-copy.
-    params: Box<RawJsonValue>,
+    params: Option<Box<RawJsonValue>>,
 }
 
 impl AnyRequest {
@@ -429,7 +432,7 @@ impl AnyRequest {
     /// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#requestMessage
     #[must_use]
     pub fn params(&self) -> &RawJsonValue {
-        &self.params
+        self.params.as_deref().unwrap_or(*NULL_VALUE)
     }
 }
 
@@ -439,7 +442,7 @@ pub struct AnyNotification {
     /// The method to be invoked.
     method: String,
     /// The notification's params.
-    params: Box<RawJsonValue>,
+    params: Option<Box<RawJsonValue>>,
 }
 
 impl AnyNotification {
@@ -456,7 +459,7 @@ impl AnyNotification {
     /// See: https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#notificationMessage
     #[must_use]
     pub fn params(&self) -> &RawJsonValue {
-        &self.params
+        self.params.as_deref().unwrap_or(*NULL_VALUE)
     }
 }
 

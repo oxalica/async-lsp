@@ -103,6 +103,7 @@ dependencies = [
  "criterion",
  "futures",
  "lsp-types",
+ "once_cell",
  "pin-project-lite",
  "regex",
  "rustix",
