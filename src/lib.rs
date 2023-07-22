@@ -345,7 +345,7 @@ struct RawRequest<'a, S: ?Sized> {
 struct RawResponse {
     id: RequestId,
     #[serde(skip_serializing_if = "Option::is_none")]
-    result: Option<JsonValue>,
+    result: Option<Box<RawJsonValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<ResponseError>,
 }
@@ -361,7 +361,7 @@ struct RawIncomingMessage {
     id: Option<RequestId>,
     method: Option<String>,
     params: Option<Box<RawJsonValue>>,
-    result: Option<JsonValue>,
+    result: Option<Box<RawJsonValue>>,
     error: Option<ResponseError>,
 }
 
@@ -824,7 +824,10 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let (result, error) = match ready!(this.fut.poll(cx)) {
-            Ok(v) => (Some(v), None),
+            Ok(v) => (
+                Some(serde_json::value::to_raw_value(&v).expect("failed to serialize")),
+                None,
+            ),
             Err(err) => (None, Some(err.into())),
         };
         let frame = MessageFrame::new(&RawResponse {
@@ -962,7 +965,9 @@ impl<T: DeserializeOwned> Future for PeerSocketRequestFuture<T> {
             .poll(cx)
             .map_err(|_| Error::ServiceStopped))?;
         Poll::Ready(match resp.error {
-            None => Ok(serde_json::from_value(resp.result.unwrap_or_default())?),
+            None => Ok(serde_json::from_str(
+                resp.result.as_deref().unwrap_or(*NULL_VALUE).get(),
+            )?),
             Some(err) => Err(Error::Response(err)),
         })
     }

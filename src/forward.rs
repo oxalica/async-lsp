@@ -10,7 +10,7 @@ use tower_service::Service;
 use crate::{
     AnyEvent, AnyNotification, AnyRequest, ClientSocket, ErrorCode, HalfRequestFrame, LspService,
     MainLoopEvent, MessageFrame, PeerSocket, RawNotification, RawResponse, ResponseError, Result,
-    ServerSocket,
+    ServerSocket, NULL_VALUE,
 };
 
 pub struct PeerSocketResponseFuture {
@@ -23,7 +23,10 @@ impl Future for PeerSocketResponseFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         match self.rx.poll_unpin(cx) {
             Poll::Ready(Ok(resp)) => Poll::Ready(match resp.error {
-                None => Ok(resp.result.unwrap_or_default()),
+                None => Ok(serde_json::from_str(
+                    resp.result.as_deref().unwrap_or(*NULL_VALUE).get(),
+                )
+                .expect("RawValue must be valid")),
                 Some(resp_err) => Err(resp_err),
             }),
             Poll::Ready(Err(_closed)) => Poll::Ready(Err(ResponseError::new(
