@@ -424,16 +424,14 @@ impl Message {
             if line == "\r\n" {
                 break;
             }
-
-            // In https://datatracker.ietf.org/doc/html/rfc7230#section-3.2
-            // > header-field = field-name ":" OWS field-value OWS
+            // NB. LSP spec is stricter than HTTP spec, the spaces here is required and it's not
+            // explicitly permitted to include extra spaces. We reject them here.
             let (name, value) = line
                 .strip_suffix("\r\n")
-                .and_then(|line| line.split_once(':'))
+                .and_then(|line| line.split_once(": "))
                 .ok_or_else(|| Error::Protocol(format!("Invalid header: {line:?}")))?;
             if name.eq_ignore_ascii_case(Self::CONTENT_LENGTH) {
                 let value = value
-                    .trim_matches(|c| c == ' ' || c == '\t')
                     .parse::<usize>()
                     .map_err(|_| Error::Protocol(format!("Invalid content-length: {value}")))?;
                 content_len = Some(value);
