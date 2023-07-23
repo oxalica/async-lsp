@@ -24,10 +24,7 @@ use lsp_types::request::{self, Request};
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{
-    AnyEvent, AnyNotification, AnyRequest, ClientSocket, Error, JsonValue, LspService,
-    ResponseError, Result,
-};
+use crate::{AnyEvent, AnyNotification, AnyRequest, ClientSocket, Error, LspService, Result};
 
 struct ClientProcessExited;
 
@@ -40,8 +37,8 @@ pub struct ClientProcessMonitor<S> {
 }
 
 impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
-    type Response = JsonValue;
-    type Error = ResponseError;
+    type Response = S::Response;
+    type Error = S::Error;
     type Future = S::Future;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {

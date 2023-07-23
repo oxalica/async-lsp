@@ -12,21 +12,19 @@ use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
 
-use crate::{
-    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
-};
+use crate::{AnyEvent, AnyNotification, AnyRequest, ErrorCode, LspService, ResponseError, Result};
 
 /// The middleware catching panics of underlying handlers and turn them into error responses.
 ///
 /// See [module level documentations](self) for details.
-pub struct CatchUnwind<S> {
+pub struct CatchUnwind<S: LspService> {
     service: S,
-    handler: Handler,
+    handler: Handler<S::Error>,
 }
 
-define_getters!(impl[S] CatchUnwind<S>, service: S);
+define_getters!(impl[S: LspService] CatchUnwind<S>, service: S);
 
-type Handler = fn(method: &str, payload: Box<dyn Any + Send>) -> ResponseError;
+type Handler<E> = fn(method: &str, payload: Box<dyn Any + Send>) -> E;
 
 fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError {
     let msg = match payload.downcast::<String>() {
@@ -44,9 +42,9 @@ fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError 
 }
 
 impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
-    type Response = JsonValue;
-    type Error = ResponseError;
-    type Future = ResponseFuture<S::Future>;
+    type Response = S::Response;
+    type Error = S::Error;
+    type Future = ResponseFuture<S::Future, S::Error>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.service.poll_ready(cx)
@@ -74,28 +72,31 @@ impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
 
 pin_project! {
     /// The [`Future`] type used by the [`CatchUnwind`] middleware.
-    pub struct ResponseFuture<Fut> {
+    pub struct ResponseFuture<Fut, Error> {
         #[pin]
-        inner: ResponseFutureInner<Fut>,
+        inner: ResponseFutureInner<Fut, Error>,
     }
 }
 
 pin_project! {
     #[project = ResponseFutureProj]
-    enum ResponseFutureInner<Fut> {
+    enum ResponseFutureInner<Fut, Error> {
         Future {
             #[pin]
             fut: Fut,
             method: String,
-            handler: Handler,
+            handler: Handler<Error>,
         },
         Ready {
-            err: Option<ResponseError>,
+            err: Option<Error>,
         },
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
+impl<Response, Fut, Error> Future for ResponseFuture<Fut, Error>
+where
+    Fut: Future<Output = Result<Response, Error>>,
+{
     type Output = Fut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -133,28 +134,28 @@ impl<S: LspService> LspService for CatchUnwind<S> {
 /// The error code is set to [`ErrorCode::INTERNAL_ERROR`].
 #[derive(Clone)]
 #[must_use]
-pub struct CatchUnwindBuilder {
-    handler: Handler,
+pub struct CatchUnwindBuilder<Error = ResponseError> {
+    handler: Handler<Error>,
 }
 
-impl Default for CatchUnwindBuilder {
+impl Default for CatchUnwindBuilder<ResponseError> {
     fn default() -> Self {
         Self::new_with_handler(default_handler)
     }
 }
 
-impl CatchUnwindBuilder {
+impl<Error> CatchUnwindBuilder<Error> {
     /// Create the builder of [`CatchUnwind`] middleware with a custom handler converting panic
     /// payloads into [`ResponseError`].
-    pub fn new_with_handler(handler: Handler) -> Self {
+    pub fn new_with_handler(handler: Handler<Error>) -> Self {
         Self { handler }
     }
 }
 
 /// A type alias of [`CatchUnwindBuilder`] conforming to the naming convention of [`tower_layer`].
-pub type CatchUnwindLayer = CatchUnwindBuilder;
+pub type CatchUnwindLayer<Error = ResponseError> = CatchUnwindBuilder<Error>;
 
-impl<S> Layer<S> for CatchUnwindBuilder {
+impl<S: LspService> Layer<S> for CatchUnwindBuilder<S::Error> {
     type Service = CatchUnwind<S>;
 
     fn layer(&self, inner: S) -> Self::Service {

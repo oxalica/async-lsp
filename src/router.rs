@@ -11,33 +11,40 @@ use lsp_types::request::Request;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, JsonValue, LspService, ResponseError,
-    Result,
+    AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
 };
 
 /// A router dispatching requests and notifications to individual handlers.
-pub struct Router<St> {
+pub struct Router<St, Error = ResponseError> {
     state: St,
-    req_handlers: HashMap<&'static str, BoxReqHandler<St>>,
+    req_handlers: HashMap<&'static str, BoxReqHandler<St, Error>>,
     notif_handlers: HashMap<&'static str, BoxNotifHandler<St>>,
     event_handlers: HashMap<TypeId, BoxEventHandler<St>>,
-    unhandled_req: BoxReqHandler<St>,
+    unhandled_req: BoxReqHandler<St, Error>,
     unhandled_notif: BoxNotifHandler<St>,
     unhandled_event: BoxEventHandler<St>,
 }
 
-type BoxReqFuture = Pin<Box<dyn Future<Output = Result<JsonValue, ResponseError>> + Send>>;
-type BoxReqHandler<St> = Box<dyn Fn(&mut St, AnyRequest) -> BoxReqFuture + Send>;
+type BoxReqFuture<Error> = Pin<Box<dyn Future<Output = Result<JsonValue, Error>> + Send>>;
+type BoxReqHandler<St, Error> = Box<dyn Fn(&mut St, AnyRequest) -> BoxReqFuture<Error> + Send>;
 type BoxNotifHandler<St> = Box<dyn Fn(&mut St, AnyNotification) -> ControlFlow<Result<()>> + Send>;
 type BoxEventHandler<St> = Box<dyn Fn(&mut St, AnyEvent) -> ControlFlow<Result<()>> + Send>;
 
-impl<St: Default> Default for Router<St> {
+impl<St, Error> Default for Router<St, Error>
+where
+    St: Default,
+    Error: From<ResponseError> + Send + 'static,
+{
     fn default() -> Self {
         Self::new(St::default())
     }
 }
 
-impl<St> Router<St> {
+// TODO: Make it possible to construct with arbitrary `Error`, with no default handlers.
+impl<St, Error> Router<St, Error>
+where
+    Error: From<ResponseError> + Send + 'static,
+{
     /// Create a empty `Router`.
     #[must_use]
     pub fn new(state: St) -> Self {
@@ -51,20 +58,23 @@ impl<St> Router<St> {
                     code: ErrorCode::METHOD_NOT_FOUND,
                     message: format!("No such method {}", req.method),
                     data: None,
-                })))
+                }
+                .into())))
             }),
             unhandled_notif: Box::new(|_, notif| {
                 if notif.method.starts_with("$/") {
                     ControlFlow::Continue(())
                 } else {
-                    ControlFlow::Break(Err(Error::Routing(format!(
+                    ControlFlow::Break(Err(crate::Error::Routing(format!(
                         "Unhandled notification: {}",
                         notif.method,
                     ))))
                 }
             }),
             unhandled_event: Box::new(|_, event| {
-                ControlFlow::Break(Err(Error::Routing(format!("Unhandled event: {event:?}"))))
+                ControlFlow::Break(Err(crate::Error::Routing(format!(
+                    "Unhandled event: {event:?}"
+                ))))
             }),
         }
     }
@@ -77,7 +87,7 @@ impl<St> Router<St> {
         handler: impl Fn(&mut St, R::Params) -> Fut + Send + 'static,
     ) -> &mut Self
     where
-        Fut: Future<Output = Result<R::Result, ResponseError>> + Send + 'static,
+        Fut: Future<Output = Result<R::Result, Error>> + Send + 'static,
     {
         self.req_handlers.insert(
             R::METHOD,
@@ -93,7 +103,8 @@ impl<St> Router<St> {
                         code: ErrorCode::INVALID_PARAMS,
                         message: format!("Failed to deserialize parameters: {err}"),
                         data: None,
-                    }))),
+                    }
+                    .into()))),
                 },
             ),
         );
@@ -148,7 +159,7 @@ impl<St> Router<St> {
         handler: impl Fn(&mut St, AnyRequest) -> Fut + Send + 'static,
     ) -> &mut Self
     where
-        Fut: Future<Output = Result<JsonValue, ResponseError>> + Send + 'static,
+        Fut: Future<Output = Result<JsonValue, Error>> + Send + 'static,
     {
         self.unhandled_req = Box::new(move |state, req| Box::pin(handler(state, req)));
         self
@@ -187,10 +198,10 @@ impl<St> Router<St> {
     }
 }
 
-impl<St> Service<AnyRequest> for Router<St> {
+impl<St, Error> Service<AnyRequest> for Router<St, Error> {
     type Response = JsonValue;
-    type Error = ResponseError;
-    type Future = BoxReqFuture;
+    type Error = Error;
+    type Future = BoxReqFuture<Error>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))

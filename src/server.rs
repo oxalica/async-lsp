@@ -21,8 +21,7 @@ use tower_layer::Layer;
 use tower_service::Service;
 
 use crate::{
-    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, JsonValue, LspService, ResponseError,
-    Result,
+    AnyEvent, AnyNotification, AnyRequest, Error, ErrorCode, LspService, ResponseError, Result,
 };
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -56,9 +55,12 @@ impl<S> Lifecycle<S> {
     }
 }
 
-impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
-    type Response = JsonValue;
-    type Error = ResponseError;
+impl<S: LspService> Service<AnyRequest> for Lifecycle<S>
+where
+    S::Error: From<ResponseError>,
+{
+    type Response = S::Response;
+    type Error = S::Error;
     type Future = ResponseFuture<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -76,13 +78,15 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                     code: ErrorCode::SERVER_NOT_INITIALIZED,
                     message: "Server is not initialized yet".into(),
                     data: None,
-                })))
+                }
+                .into())))
             }
             (_, request::Initialize::METHOD) => Either::Right(ready(Err(ResponseError {
                 code: ErrorCode::INVALID_REQUEST,
                 message: "Server is already initialized".into(),
                 data: None,
-            }))),
+            }
+            .into()))),
             (State::Ready, _) => {
                 if req.method == request::Shutdown::METHOD {
                     self.state = State::ShuttingDown;
@@ -93,13 +97,17 @@ impl<S: LspService> Service<AnyRequest> for Lifecycle<S> {
                 code: ErrorCode::INVALID_REQUEST,
                 message: "Server is shutting down".into(),
                 data: None,
-            }))),
+            }
+            .into()))),
         };
         ResponseFuture { inner }
     }
 }
 
-impl<S: LspService> LspService for Lifecycle<S> {
+impl<S: LspService> LspService for Lifecycle<S>
+where
+    S::Error: From<ResponseError>,
+{
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         match &*notif.method {
             notification::Exit::METHOD => {
@@ -134,8 +142,8 @@ pin_project! {
     }
 }
 
-impl<Fut: Future<Output = Result<JsonValue, ResponseError>>> Future for ResponseFuture<Fut> {
-    type Output = Result<JsonValue, ResponseError>;
+impl<Fut: Future> Future for ResponseFuture<Fut> {
+    type Output = Fut::Output;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         self.project().inner.poll(cx)
