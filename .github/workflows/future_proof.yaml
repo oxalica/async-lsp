@@ -20,4 +20,4 @@ jobs:
       - name: Install cargo-outdated
         uses: dtolnay/install@cargo-outdated
       - name: cargo-outdated
-        run: cargo outdated --workspace --exit-code 1
+        run: rm -f Cargo.lock && cargo outdated --workspace --exit-code 1
