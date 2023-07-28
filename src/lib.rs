@@ -548,7 +548,21 @@ where
 
                 resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
                 event = self.rx.next() => self.dispatch_event(event.expect("Sender is alive")),
-                msg = incoming.next() => self.dispatch_message(msg.expect("Never ends")?).await,
+                msg = incoming.next() => {
+                    let dispatch_fut = self.dispatch_message(msg.expect("Never ends")?).fuse();
+                    pin_mut!(dispatch_fut);
+                    // NB. Concurrently wait for `poll_ready`, and write out the last message.
+                    // If the service is waiting for client's response of the last request, while
+                    // the last message is not delivered on the first write, it can deadlock.
+                    loop {
+                        select_biased! {
+                            // Dispatch first. It usually succeeds immediately for non-requests,
+                            // and the service is hardly busy.
+                            ctl = dispatch_fut => break ctl,
+                            ret = flush_fut => { ret?; continue }
+                        }
+                    }
+                }
             };
             let msg = match ctl {
                 ControlFlow::Continue(Some(msg)) => msg,
@@ -571,7 +585,6 @@ where
     async fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
         match msg {
             Message::Request(req) => {
-                // FIXME: This blocks main loop.
                 if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
                     let resp = AnyResponse {
                         id: req.id,
