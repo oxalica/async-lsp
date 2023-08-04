@@ -515,7 +515,7 @@ where
     /// [`BufReader`].
     // Documented in `Self::run`.
     #[allow(clippy::missing_errors_doc)]
-    pub async fn run_bufferred(self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
+    pub async fn run_buffered(self, input: impl AsyncRead, output: impl AsyncWrite) -> Result<()> {
         self.run(BufReader::new(input), output).await
     }
 
