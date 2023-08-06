@@ -138,5 +138,5 @@ async fn main() {
         tokio_util::compat::TokioAsyncWriteCompatExt::compat_write(tokio::io::stdout()),
     );
 
-    server.run_bufferred(stdin, stdout).await.unwrap();
+    server.run_buffered(stdin, stdout).await.unwrap();
 }

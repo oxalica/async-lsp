@@ -93,14 +93,14 @@ async fn mock_server_and_client() {
     let (server_rx, server_tx) = server_stream.compat().split();
     let server_main = tokio::spawn(async move {
         server_main
-            .run_bufferred(server_rx, server_tx)
+            .run_buffered(server_rx, server_tx)
             .await
             .unwrap();
     });
     let (client_rx, client_tx) = client_stream.compat().split();
     let client_main = tokio::spawn(async move {
         let err = client_main
-            .run_bufferred(client_rx, client_tx)
+            .run_buffered(client_rx, client_tx)
             .await
             .unwrap_err();
         assert!(
