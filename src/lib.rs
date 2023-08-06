@@ -44,7 +44,7 @@
 //! - `stdio`: Utilities to deal with pipe-like stdin/stdout communication channel for Language
 //!   Servers.
 //!   *Enabled by default.*
-//! - `tracing`: Intergration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
+//! - `tracing`: Integration with crate [`tracing`][::tracing] and the [`tracing`] middleware.
 //!   *Enabled by default.*
 //! - `forward`: Impl [`LspService`] for `{Client,Server}Socket`. This collides some method names
 //!   but allows easy service forwarding. See `examples/inspector.rs` for a possible use case.

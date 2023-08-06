@@ -36,7 +36,7 @@
 //! use futures::AsyncWriteExt;
 //!
 //! let mut stdout = async_io::Async::new(async_lsp::stdio::PipeStdout::lock()?)?;
-//! stdout.write_all(b"truely async, without spawning blocking task!").await?;
+//! stdout.write_all(b"truly async, without spawning blocking task!").await?;
 //! # Ok(())
 //! # }
 //! ```
