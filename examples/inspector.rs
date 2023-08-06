@@ -123,11 +123,11 @@ async fn main() {
 
     let child_stdin = child.stdin.take().unwrap();
     let child_stdout = child.stdout.take().unwrap();
-    let main1 = tokio::spawn(mock_client.run_bufferred(child_stdout, child_stdin));
+    let main1 = tokio::spawn(mock_client.run_buffered(child_stdout, child_stdin));
 
     let stdin = tokio::io::stdin().compat();
     let stdout = tokio::io::stdout().compat_write();
-    let main2 = tokio::spawn(mock_server.run_bufferred(stdin, stdout));
+    let main2 = tokio::spawn(mock_server.run_buffered(stdin, stdout));
 
     let ret = tokio::select! {
         ret = main1 => ret,

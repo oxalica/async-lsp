@@ -103,7 +103,7 @@ async fn main() {
     let stdin = child.stdin.unwrap();
 
     let mainloop_fut = tokio::spawn(async move {
-        mainloop.run_bufferred(stdout, stdin).await.unwrap();
+        mainloop.run_buffered(stdout, stdin).await.unwrap();
     });
 
     // Initialize.
