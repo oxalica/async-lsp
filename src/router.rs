@@ -171,7 +171,8 @@ where
     /// There can only be a single catch-all notification handler. New ones replace old ones.
     ///
     /// The default handler is to do nothing for methods starting with `$/`, and break the main
-    /// loop with [`Error::Routing`] for other methods. Typically notifications are critical and
+    /// loop with [`Error::Routing`][crate::Error::Routing] for other methods. Typically
+    /// notifications are critical and
     /// losing them can break state synchronization, easily leading to catastrophic failures after
     /// incorrect incremental changes.
     pub fn unhandled_notification(
@@ -187,7 +188,8 @@ where
     ///
     /// There can only be a single catch-all event handler. New ones replace old ones.
     ///
-    /// The default handler is to break the main loop with [`Error::Routing`]. Since events are
+    /// The default handler is to break the main loop with
+    /// [`Error::Routing`][crate::Error::Routing]. Since events are
     /// emitted internally, mishandling are typically logic errors.
     pub fn unhandled_event(
         &mut self,
