@@ -80,8 +80,8 @@ macro_rules! define_server {
         { $($req_snake:ident, $req:ty;)* }
         { $($notif_snake:ident, $notif:ty;)* }
     ) => {
-        /// The omnitrait defining all standard LSP requests and notifications for a Language
-        /// Server.
+        /// The omnitrait defining all standard LSP requests and notifications supported by
+        /// [`lsp_types`] for a Language Server.
         #[allow(missing_docs)]
         pub trait LanguageServer {
             /// Should always be defined to [`ResponseError`] for user implementations.
@@ -244,8 +244,8 @@ macro_rules! define_client {
         { $($req_snake:ident, $req:ty;)* }
         { $($notif_snake:ident, $notif:ty;)* }
     ) => {
-        /// The omnitrait defining all standard LSP requests and notifications for a Language
-        /// Client.
+        /// The omnitrait defining all standard LSP requests and notifications supported by
+        /// [`lsp_types`] for a Language Client.
         #[allow(missing_docs)]
         pub trait LanguageClient {
             /// Should always be defined to [`ResponseError`] for user implementations.
