@@ -28,6 +28,8 @@ define! {
         "textDocument/inlineValue", inline_value;
         "textDocument/inlayHint", inlay_hint;
         "inlayHint/resolve", inlay_hint_resolve;
+        "textDocument/diagnostic", document_diagnostic;
+        "workspace/diagnostic", workspace_diagnostic;
         "textDocument/willSaveWaitUntil", will_save_wait_until;
         "textDocument/completion", completion;
         "completionItem/resolve", completion_item_resolve;
@@ -40,6 +42,7 @@ define! {
         "textDocument/codeAction", code_action;
         "codeAction/resolve", code_action_resolve;
         "workspace/symbol", symbol;
+        "workspaceSymbol/resolve", workspace_symbol_resolve;
         "textDocument/codeLens", code_lens;
         "codeLens/resolve", code_lens_resolve;
         "textDocument/documentLink", document_link;
@@ -78,6 +81,7 @@ define! {
         "window/showDocument", show_document;
         "workspace/inlineValue/refresh", inline_value_refresh;
         "workspace/inlayHint/refresh", inlay_hint_refresh;
+        "workspace/diagnostic/refresh", workspace_diagnostic_refresh;
         "client/registerCapability", register_capability;
         "client/unregisterCapability", unregister_capability;
         "window/showMessageRequest", show_message_request;

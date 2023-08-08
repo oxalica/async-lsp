@@ -11,13 +11,12 @@ fi | jq -r '
     # Notebook protocols are not supported.
     test("^notebookDocument/")
     # Lifecycle methods are handled specially outside.
-    or test("^(initialized?|shutdown|exit)$")
-    # See: https://github.com/gluon-lang/lsp-types/pull/258
-    or test("^(workspace|textDocument)/diagnostic")
-    # See: https://github.com/gluon-lang/lsp-types/pull/262
-    or test("^workspaceSymbol/resolve$");
+    or test("^(initialized?|shutdown|exit)$");
 
   def to_snake:
+    # Keep the prefix for `*/diagnostic` since both for workspace and document exist.
+    sub("textDocument/diagnostic"; "document_diagnostic") |
+    sub("workspace/diagnostic"; "workspace_diagnostic") |
     sub("^(workspace|textDocument|callHierarchy|typeHierarchy|window|client|\\$)/"; "") |
     sub("/"; "_"; "g") | sub("(?<x>[A-Z])"; "_\(.x | ascii_downcase)"; "g");
 
