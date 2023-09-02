@@ -410,7 +410,7 @@ impl ResponseError {
 }
 
 impl Message {
-    const CONTENT_LENGTH: &str = "Content-Length";
+    const CONTENT_LENGTH: &'static str = "Content-Length";
 
     async fn read(mut reader: impl AsyncBufRead + Unpin) -> Result<Self> {
         let mut line = String::new();
