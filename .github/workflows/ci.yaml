@@ -31,7 +31,9 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: rust-analyzer
       - name: Install cargo-hack
-        run: cargo install cargo-hack
+        # Always use stable rustc to compile cargo-hack, which has MSRV 1.65.
+        # https://github.com/taiki-e/cargo-hack/commit/5baa4262710414ebde4845494f1db22643acc0ba
+        run: cargo +stable install cargo-hack
       # `cargo build` doesn't pull in [dev-dependencies].
       - name: Build
         run: cargo hack build --each-feature
