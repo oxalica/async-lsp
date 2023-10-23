@@ -28,24 +28,45 @@
 //!
 //! # Asynchrous I/O drivers
 //!
-//! For runtime/drivers with uniform interfaces for sync-async conversion like `async_io::Async`,
-//! wrapping `PipeStd{in,out}` inside it just works.
+//! ## `async-io`
+//!
+//! Wrapping `PipeStd{in,out}` inside `async_io::Async<T>` works. This should also work for other
+//! drivers with a similar generic asynchronous adapter interface.
+//!
+//! For `async-io` >= 2, feature `async-io` should be enabled to let `Async<PipeStd{in,out}>`
+//! implements `Async{Read,Write}`. `async-io` < 2 does not require it to work.
+//! See more details in: <https://github.com/smol-rs/async-io/pull/142>
 //!
 //! ```
 //! # async fn work() -> std::io::Result<()> {
 //! use futures::AsyncWriteExt;
 //!
 //! let mut stdout = async_io::Async::new(async_lsp::stdio::PipeStdout::lock()?)?;
-//! stdout.write_all(b"truly async, without spawning blocking task!").await?;
+//! // For `async-io` >= 2, this requires `async-io` feature to work.
+#![cfg_attr(not(feature = "async-io"), doc = "# #[cfg(never)]")]
+//! stdout.write_all(b"never spawns blocking tasks").await?;
+//! // This always work.
+//! (&stdout).write_all(b"never spawns blocking tasks").await?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! For `tokio` runtime, their interface is
-//! [less ergonomic](https://github.com/tokio-rs/tokio/issues/5785).
-//! We provide a wrapper method `PipeStdin::lock_tokio` for an `tokio::io::AsyncRead`
-//! compatible interface. [`PipeStdout`] works in class. All of them are gated under feature
-//! `tokio`.
+//! ## `tokio`
+//!
+//! There are methods `PipeStd{in,out}::{lock,try_into}_tokio` gated under feature `tokio` to
+//! work with `tokio` runtime. The returned type implements coresponding
+//! `tokio::io::Async{Read,Write}` interface.
+//!
+//! ```
+//! # #[cfg(feature = "tokio")]
+//! # async fn work() -> std::io::Result<()> {
+//! use tokio::io::AsyncWriteExt;
+//!
+//! let mut stdout = async_lsp::stdio::PipeStdout::lock_tokio()?;
+//! stdout.write_all(b"never spawns blocking tasks").await?;
+//! # Ok(())
+//! # }
+//! ```
 use std::io::{self, Error, ErrorKind, IoSlice, Read, Result, StdinLock, StdoutLock, Write};
 use std::os::unix::io::{AsFd, AsRawFd, BorrowedFd, RawFd};
 
@@ -113,6 +134,10 @@ impl AsRawFd for PipeStdin {
     }
 }
 
+// Invariant: `AsFd::as_fd` never changes through its lifetime.
+#[cfg(feature = "async-io")]
+unsafe impl async_io::IoSafe for PipeStdin {}
+
 // NB. Bypass the internal buffer of `StdinLock` here to keep this in sync with the readiness of
 // the underlying FD (which is relied by the I/O re/actor).
 impl Read for &'_ PipeStdin {
@@ -164,6 +189,10 @@ impl AsRawFd for PipeStdout {
         self.inner.inner.as_raw_fd()
     }
 }
+
+// Invariant: `AsFd::as_fd` never changes through its lifetime.
+#[cfg(feature = "async-io")]
+unsafe impl async_io::IoSafe for PipeStdout {}
 
 // NB. See `Read` impl.
 impl Write for &'_ PipeStdout {

@@ -64,6 +64,7 @@ name = "bench"
 harness = false
 
 [dependencies]
+async-io = { version = "2", optional = true }
 futures = { version = "0.3.28", default-features = false, features = ["async-await", "std"] }
 lsp-types = "0.94.1"
 pin-project-lite = "0.2.9"
@@ -78,7 +79,7 @@ tracing = { version = "0.1.37", optional = true }
 waitpid-any = { version = "0.2.0", optional = true }
 
 [dev-dependencies]
-async-io = "1.13.0"
+async-io = "2"
 async-process = "1.7.0"
 clap = { version = "4", default-features = false, features = ["help"] } # Workaround: https://github.com/bheisler/criterion.rs/issues/702
 criterion = { version = "0.5.1", features = ["async_tokio"] }
