@@ -93,4 +93,5 @@ debug = 1
 
 [package.metadata.docs.rs]
 all-features = true
-rustdoc-args = ["--cfg", "docsrs"]
+# Workaround: https://github.com/rust-lang/rust/issues/117622
+rustdoc-args = ["--cfg", "docsrs_"]

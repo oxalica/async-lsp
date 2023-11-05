@@ -64,5 +64,5 @@ jobs:
         uses: dtolnay/rust-toolchain@clippy
       - name: Rustdoc
         env:
-          RUSTDOCFLAGS: --cfg docsrs -Dwarnings
+          RUSTDOCFLAGS: --cfg docsrs_ -Dwarnings
         run: cargo doc --all-features
