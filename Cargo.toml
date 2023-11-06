@@ -80,13 +80,21 @@ waitpid-any = { version = "0.2.0", optional = true }
 
 [dev-dependencies]
 async-io = "2"
-async-process = "1.7.0"
-clap = { version = "4", default-features = false, features = ["help"] } # Workaround: https://github.com/bheisler/criterion.rs/issues/702
+async-process = "2"
+# clap 4.4.0 have MSRV 1.70
+# Workaround: https://github.com/bheisler/criterion.rs/issues/702
+clap = { version = "4, <4.4", default-features = false, features = ["help"] }
 criterion = { version = "0.5.1", features = ["async_tokio"] }
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "process", "rt", "time"] }
 tokio-util = { version = "0.7.8", features = ["compat"] }
 tower = "0.4.13"
 tracing-subscriber = "0.3.16"
+
+# MSRV fixes.
+# NB. These requirements are in dev-dependencies thus have no effect on downstream crates.
+anstyle = "1, <1.0.3" # 1.0.4 have MSRV 1.70
+clap_lex = "=0.5.0" # 0.5.1 have MSRV 1.70
+regex = "1, <1.10" # 1.10 have MSRV 1.65
 
 [profile.bench]
 debug = 1
