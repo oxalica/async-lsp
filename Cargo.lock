@@ -93,7 +93,7 @@ dependencies = [
 
 [[package]]
 name = "async-lsp"
-version = "0.0.5"
+version = "0.1.0"
 dependencies = [
  "anstyle",
  "async-io",

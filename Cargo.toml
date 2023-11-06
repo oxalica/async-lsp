@@ -1,6 +1,6 @@
 [package]
 name = "async-lsp"
-version = "0.0.5"
+version = "0.1.0"
 edition = "2021"
 description = "Asynchronous Language Server Protocol (LSP) framework based on tower"
 keywords = ["lsp", "language-server", "tower"]
