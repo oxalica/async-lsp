@@ -54,7 +54,7 @@
 //! ## `tokio`
 //!
 //! There are methods `PipeStd{in,out}::{lock,try_into}_tokio` gated under feature `tokio` to
-//! work with `tokio` runtime. The returned type implements coresponding
+//! work with `tokio` runtime. The returned type implements corresponding
 //! `tokio::io::Async{Read,Write}` interface.
 //!
 //! ```
