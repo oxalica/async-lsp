@@ -79,6 +79,9 @@ use serde_json::Value as JsonValue;
 use thiserror::Error;
 use tower_service::Service;
 
+/// Re-export of the [`lsp_types`] dependency of this crate.
+pub use lsp_types;
+
 macro_rules! define_getters {
     (impl[$($generic:tt)*] $ty:ty, $field:ident : $field_ty:ty) => {
         impl<$($generic)*> $ty {
