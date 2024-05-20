@@ -21,4 +21,4 @@ jobs:
       - name: Install cargo-outdated
         uses: dtolnay/install@cargo-outdated
       - name: cargo-outdated
-        run: rm -f Cargo.lock && cargo outdated --workspace --exit-code 1 --root-deps-only --exclude=clap,anstyle,clap_lex,regex
+        run: rm -f Cargo.lock && cargo outdated --workspace --exit-code 1 --root-deps-only --exclude=clap,anstyle,clap_lex,regex,lsp-types
