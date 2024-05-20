@@ -13,7 +13,7 @@ use lsp_types::{
     InitializedParams, MarkupContent, NumberOrString, Position, ProgressParams,
     ProgressParamsValue, PublishDiagnosticsParams, ShowMessageParams, TextDocumentIdentifier,
     TextDocumentItem, TextDocumentPositionParams, Url, WindowClientCapabilities, WorkDoneProgress,
-    WorkDoneProgressParams,
+    WorkDoneProgressParams, WorkspaceFolder,
 };
 use tower::ServiceBuilder;
 use tracing::{info, Level};
@@ -107,10 +107,12 @@ async fn main() {
     });
 
     // Initialize.
-    let root_uri = Url::from_file_path(&root_dir).unwrap();
     let init_ret = server
         .initialize(InitializeParams {
-            root_uri: Some(root_uri),
+            workspace_folders: Some(vec![WorkspaceFolder {
+                uri: Url::from_file_path(&root_dir).unwrap(),
+                name: "root".into(),
+            }]),
             capabilities: ClientCapabilities {
                 window: Some(WindowClientCapabilities {
                     work_done_progress: Some(true),
