@@ -788,6 +788,8 @@ impl<T: DeserializeOwned> Future for PeerSocketRequestFuture<T> {
 ///
 /// This is a wrapper of `Box<dyn Any + Send>`, but saves the underlying type name for better
 /// `Debug` impl.
+///
+/// See [`LspService::emit`] for usages of this type.
 pub struct AnyEvent {
     inner: Box<dyn Any + Send>,
     type_name: &'static str,
