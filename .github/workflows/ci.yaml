@@ -50,7 +50,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # FIXME: MacOS' `sed` is incompatible with `gnused`.
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -58,7 +59,8 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: ${{ matrix.rust }}
+          # Sync with Cargo.toml!
+          toolchain: "1.64"
           components: rust-analyzer
       - name: Build
         # Workaround of `-Z avoid-dev-deps`
