@@ -812,8 +812,12 @@ impl AnyEvent {
         }
     }
 
+    /// Returns the [`TypeId`] of the inner event value.
+    ///
+    /// This allows non-destructive type inspection, similar to how
+    /// [`AnyRequest::method`] and [`AnyNotification::method`] identify message types.
     #[must_use]
-    fn inner_type_id(&self) -> TypeId {
+    pub fn inner_type_id(&self) -> TypeId {
         // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
         Any::type_id(&*self.inner)
     }
