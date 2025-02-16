@@ -19,6 +19,8 @@ use tower::ServiceBuilder;
 use tracing::{info, Level};
 
 const TEST_ROOT: &str = "tests/client_test_data";
+// Old and new token names.
+const RA_INDEXING_TOKENS: &[&str] = &["rustAnalyzer/Indexing", "rustAnalyzer/cachePriming"];
 
 struct ClientState {
     indexed_tx: Option<oneshot::Sender<()>>,
@@ -30,7 +32,7 @@ impl LanguageClient for ClientState {
 
     fn progress(&mut self, params: ProgressParams) -> Self::NotifyResult {
         tracing::info!("{:?} {:?}", params.token, params.value);
-        if matches!(params.token, NumberOrString::String(s) if s == "rustAnalyzer/Indexing")
+        if matches!(params.token, NumberOrString::String(s) if RA_INDEXING_TOKENS.contains(&&*s))
             && matches!(
                 params.value,
                 ProgressParamsValue::WorkDone(WorkDoneProgress::End(_))

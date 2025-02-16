@@ -19,6 +19,8 @@ use tower::ServiceBuilder;
 use tracing::{info, Level};
 
 const TEST_ROOT: &str = "tests/client_test_data";
+// Old and new token names.
+const RA_INDEXING_TOKENS: &[&str] = &["rustAnalyzer/Indexing", "rustAnalyzer/cachePriming"];
 
 struct ClientState {
     indexed_tx: Option<oneshot::Sender<()>>,
@@ -41,7 +43,7 @@ async fn main() {
         router
             .notification::<Progress>(|this, prog| {
                 tracing::info!("{:?} {:?}", prog.token, prog.value);
-                if matches!(prog.token, NumberOrString::String(s) if s == "rustAnalyzer/Indexing")
+                if matches!(prog.token, NumberOrString::String(s) if RA_INDEXING_TOKENS.contains(&&*s))
                     && matches!(
                         prog.value,
                         ProgressParamsValue::WorkDone(WorkDoneProgress::End(_))
