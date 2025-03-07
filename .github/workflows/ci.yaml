@@ -110,3 +110,17 @@ jobs:
         env:
           RUSTDOCFLAGS: --cfg docsrs_ -Dwarnings
         run: cargo doc --all-features
+
+  minimal:
+    timeout-minutes: 15
+    name: Minimal versions on ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - run: cargo generate-lockfile -Z minimal-versions
+      - run: cargo check --locked
