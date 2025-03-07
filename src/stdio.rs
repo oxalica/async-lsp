@@ -277,11 +277,17 @@ mod tokio_impl {
             cx: &mut Context<'_>,
             buf: &mut ReadBuf<'_>,
         ) -> Poll<io::Result<()>> {
-            let len = ready!(<Self as futures::AsyncRead>::poll_read(
-                self,
-                cx,
-                buf.initialize_unfilled()
-            ))?;
+            let len = loop {
+                let mut guard = ready!(self.inner.poll_read_ready(cx))?;
+                match guard.try_io(|inner| {
+                    // SAFETY: `read()` does not de-initialize any byte.
+                    let (written, _) = rustix::io::read(inner, unsafe { buf.unfilled_mut() })?;
+                    Ok(written.len())
+                }) {
+                    Ok(ret) => break ret?,
+                    Err(_would_block) => continue,
+                }
+            };
             buf.advance(len);
             Poll::Ready(Ok(()))
         }
