@@ -8,9 +8,8 @@ categories = ["asynchronous"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/oxalica/async-lsp"
 # Required features:
-# - std::future::poll_fn
-# - std::task::ready!
-rust-version = "1.64" # Sync with CI!
+# - std::hint::black_box
+rust-version = "1.66" # Sync with CI!
 include = [
     "/Cargo.toml",
     "/LICENSE-APACHE",
@@ -82,9 +81,7 @@ waitpid-any = { version = "0.3", optional = true }
 [dev-dependencies]
 async-io = "2"
 async-process = "2"
-# Workaround: https://github.com/bheisler/criterion.rs/issues/702
-clap = { version = "4", default-features = false, features = ["help"] }
-criterion = { version = "0.5.1", features = ["async_tokio"] }
+criterion = { version = "0.6", features = ["async_tokio"] }
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "process", "rt", "time"] }
 tokio-util = { version = "0.7.8", features = ["compat"] }
 tower = "0.5"
