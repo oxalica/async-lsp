@@ -35,10 +35,7 @@ jobs:
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-hack
-        # Always use stable rustc to compile cargo-hack, which has MSRV 1.65.
-        # https://github.com/taiki-e/cargo-hack/commit/5baa4262710414ebde4845494f1db22643acc0ba
-        run: cargo +stable install cargo-hack
+      - uses: taiki-e/install-action@cargo-hack
 
       # `cargo build` doesn't pull in [dev-dependencies].
       - name: Build
@@ -66,16 +63,18 @@ jobs:
       # Sync with Cargo.toml!
       - name: Install Rust
         run: |
-          rustup update --no-self-update stable
-          rustup default 1.64
-          rustup component add rust-analyzer
+          rustup update --no-self-update
+          rustup toolchain add nightly
+          # Sync with Cargo.toml!
+          rustup default 1.66
+
+      - uses: taiki-e/install-action@cargo-minimal-versions
+      - uses: taiki-e/install-action@cargo-hack
 
       - name: Build
-        # Workaround of `-Z avoid-dev-deps`
-        # See: https://github.com/rust-lang/cargo/issues/5133#issuecomment-1307094647
-        run: |
-          sed -i 's/\[dev-dependencies]/[workaround-avoid-dev-deps]/g' ./Cargo.toml
-          cargo build --all-features
+        env:
+          CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
+        run: cargo minimal-versions build --direct --all-features
 
   clippy:
     name: Clippy
