@@ -6,7 +6,7 @@ use async_lsp::concurrency::ConcurrencyLayer;
 use async_lsp::panic::CatchUnwindLayer;
 use async_lsp::router::Router;
 use async_lsp::tracing::TracingLayer;
-use async_lsp::LanguageServer;
+use async_lsp::{Error, ErrorCode, LanguageServer};
 use futures::channel::oneshot;
 use lsp_types::notification::{Progress, PublishDiagnostics, ShowMessage};
 use lsp_types::{
@@ -114,7 +114,7 @@ async fn main() {
 
     // Synchronize documents.
     let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
-    let text = "fn func() { let var = 1; }";
+    let text = "#![no_std] fn func() { let var = 1; }";
     server
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
@@ -131,17 +131,27 @@ async fn main() {
 
     // Query.
     let var_pos = text.find("var").unwrap();
-    let hover = server
-        .hover(HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: file_uri },
-                position: Position::new(0, var_pos as _),
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        })
-        .await
-        .unwrap()
-        .unwrap();
+    let hover = loop {
+        let ret = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier {
+                        uri: file_uri.clone(),
+                    },
+                    position: Position::new(0, var_pos as _),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await;
+        match ret {
+            Ok(resp) => break resp.expect("no hover"),
+            // Sometimes rust-analyzer replies CONTENT_MODIFIED if it's not completely ready yet.
+            Err(Error::Response(resp)) if resp.code == ErrorCode::CONTENT_MODIFIED => {
+                continue;
+            }
+            Err(err) => panic!("request failed: {err}"),
+        }
+    };
     info!("Hover result: {hover:?}");
     assert!(
         matches!(
