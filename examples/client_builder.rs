@@ -113,15 +113,16 @@ async fn main() {
     server.initialized(InitializedParams {}).unwrap();
 
     // Synchronize documents.
-    let file_uri = Url::from_file_path(root_dir.join("src/lib.rs")).unwrap();
-    let text = "fn func() { let var = 1; }";
+    let file_path = root_dir.join("src/lib.rs");
+    let file_uri = Url::from_file_path(&file_path).unwrap();
+    let file_content = std::fs::read_to_string(&file_path).unwrap();
     server
         .did_open(DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri: file_uri.clone(),
                 language_id: "rust".into(),
                 version: 0,
-                text: text.into(),
+                text: file_content.clone(),
             },
         })
         .unwrap();
@@ -130,7 +131,7 @@ async fn main() {
     indexed_rx.await.unwrap();
 
     // Query.
-    let var_pos = text.find("var").unwrap();
+    let var_pos = file_content.find("var").unwrap();
     let hover = server
         .hover(HoverParams {
             text_document_position_params: TextDocumentPositionParams {
