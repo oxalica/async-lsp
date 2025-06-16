@@ -1,6 +1,7 @@
 //! Dispatch requests and notifications to individual handlers.
 use std::any::TypeId;
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::future::{ready, Future};
 use std::ops::ControlFlow;
 use std::pin::Pin;
@@ -9,7 +10,9 @@ use std::task::{Context, Poll};
 use lsp_types::notification::Notification;
 use lsp_types::request::Request;
 use tower_service::Service;
+use tracing::debug;
 
+use crate::can_handle::CanHandle;
 use crate::{
     AnyEvent, AnyNotification, AnyRequest, ErrorCode, JsonValue, LspService, ResponseError, Result,
 };
@@ -88,6 +91,8 @@ where
     ) -> &mut Self
     where
         Fut: Future<Output = Result<R::Result, Error>> + Send + 'static,
+        R::Result: Debug,
+        Error: Debug,
     {
         self.req_handlers.insert(
             R::METHOD,
@@ -96,7 +101,10 @@ where
                     Ok(params) => {
                         let fut = handler(state, params);
                         Box::pin(async move {
-                            Ok(serde_json::to_value(fut.await?).expect("Serialization failed"))
+                            let lsp_result =
+                                Ok(serde_json::to_value(fut.await?).expect("Serialization failed"));
+                            debug!("Router got LSP result: {:?}", lsp_result);
+                            lsp_result
                         })
                     }
                     Err(err) => Box::pin(ready(Err(ResponseError {
@@ -200,6 +208,28 @@ where
     }
 }
 
+impl<St, E> CanHandle<AnyRequest> for Router<St, E> {
+    /// Returns `true` if this router has a handler for the given request.
+    fn can_handle(&self, req: &AnyRequest) -> bool {
+        self.req_handlers.contains_key(&req.method.as_str())
+    }
+}
+
+impl<St, E> CanHandle<AnyNotification> for Router<St, E> {
+    /// Returns `true` if this router has a handler for the given notification.
+    fn can_handle(&self, notification: &AnyNotification) -> bool {
+        self.notif_handlers
+            .contains_key(&notification.method.as_str())
+    }
+}
+
+impl<St, E> CanHandle<AnyEvent> for Router<St, E> {
+    /// Returns `true` if this router has a handler for the given event.
+    fn can_handle(&self, event: &AnyEvent) -> bool {
+        self.event_handlers.contains_key(&event.inner_type_id())
+    }
+}
+
 impl<St, Error> Service<AnyRequest> for Router<St, Error> {
     type Response = JsonValue;
     type Error = Error;
@@ -210,11 +240,15 @@ impl<St, Error> Service<AnyRequest> for Router<St, Error> {
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
+        let method = req.method.clone();
         let h = self
             .req_handlers
             .get(&*req.method)
             .unwrap_or(&self.unhandled_req);
-        h(&mut self.state, req)
+        let result = h(&mut self.state, req);
+
+        debug!("Router got result for method: {method:?}",);
+        result
     }
 }
 
