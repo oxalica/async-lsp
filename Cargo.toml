@@ -81,7 +81,7 @@ waitpid-any = { version = "0.3", optional = true }
 [dev-dependencies]
 async-io = "2"
 async-process = "2"
-criterion = { version = "0.6", features = ["async_tokio"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 tokio = { version = "1.27.0", features = ["io-std", "io-util", "macros", "process", "rt", "time"] }
 tokio-util = { version = "0.7.8", features = ["compat"] }
 tower = "0.5"
