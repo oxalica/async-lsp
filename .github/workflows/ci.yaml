@@ -23,14 +23,12 @@ jobs:
     name: Test ${{ matrix.rust }} on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust ${{ matrix.rust }}
-        run: |
-          rustup update --no-self-update beta
-          rustup default ${{ matrix.rust }}
-          rustup component add rust-analyzer
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.rust }}
+          components: rust-analyzer
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@v2
@@ -57,55 +55,42 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Sync with Cargo.toml!
-      - name: Install Rust
-        run: |
-          rustup update --no-self-update
-          rustup toolchain add nightly
-          # Sync with Cargo.toml!
-          rustup default 1.66
+      # cargo-minimal-versions itself needs nightly to update lockfile.
+      - uses: dtolnay/rust-toolchain@nightly
 
       - uses: taiki-e/install-action@cargo-minimal-versions
       - uses: taiki-e/install-action@cargo-hack
 
-      - name: Build
+      # Sync MSRV with Cargo.toml!
+      - run: cargo +1.66 minimal-versions build --direct --all-features
         env:
           CARGO_RESOLVER_INCOMPATIBLE_RUST_VERSIONS: fallback
-        run: cargo minimal-versions build --direct --all-features
+        
 
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust
-        run: |
-          rustup update --no-self-update stable
-          rustup default stable
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: clippy
 
-      - run: |
-          cargo clippy --all-targets --all-features -- -Dclippy::all
+      - run: cargo clippy --all-targets --all-features -- -Dclippy::all
 
   docs:
     name: Docs
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Install Rust
-        run: |
-          rustup update --no-self-update stable
-          rustup default stable
+      - uses: dtolnay/rust-toolchain@stable
 
-      - name: cargo doc
+      - run: cargo doc --all-features
         env:
           RUSTDOCFLAGS: --cfg docsrs_ -Dwarnings
-        run: cargo doc --all-features
