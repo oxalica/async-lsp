@@ -230,7 +230,7 @@ impl<St> LspService for Router<St> {
     fn emit(&mut self, event: AnyEvent) -> ControlFlow<Result<()>> {
         let h = self
             .event_handlers
-            .get(&event.inner_type_id())
+            .get(&event.inner().type_id())
             .unwrap_or(&self.unhandled_event);
         h(&mut self.state, event)
     }

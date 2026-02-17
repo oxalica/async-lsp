@@ -53,7 +53,7 @@
 //!   *Disabled by default.*
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![warn(missing_docs)]
-use std::any::{type_name, Any, TypeId};
+use std::any::{type_name, Any};
 use std::collections::HashMap;
 use std::future::{poll_fn, Future};
 use std::marker::PhantomData;
@@ -812,10 +812,16 @@ impl AnyEvent {
         }
     }
 
+    /// Returns a reference to the inner `dyn Any + Send` value.
     #[must_use]
-    fn inner_type_id(&self) -> TypeId {
-        // Call `type_id` on the inner `dyn Any`, not `Box<_> as Any` or `&Box<_> as Any`.
-        Any::type_id(&*self.inner)
+    pub fn inner(&self) -> &(dyn Any + Send) {
+        &*self.inner
+    }
+
+    /// Consumes the event, returning the inner `Box<dyn Any + Send>`.
+    #[must_use]
+    pub fn into_inner(self) -> Box<dyn Any + Send> {
+        self.inner
     }
 
     /// Get the underlying type name for debugging purpose.
