@@ -154,7 +154,9 @@ where
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         if notif.method == notification::Cancel::METHOD {
             if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {
-                self.ongoing.remove(&params.id);
+                if let Some(handle) = self.ongoing.remove(&params.id) {
+                    handle.abort();
+                }
             }
             return ControlFlow::Continue(());
         }
