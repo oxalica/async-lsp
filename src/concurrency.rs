@@ -17,7 +17,7 @@ use std::thread::available_parallelism;
 
 use futures::stream::{AbortHandle, Abortable};
 use futures::task::AtomicWaker;
-use lsp_types::notification::{self, Notification};
+use lsp_types::{json_rpc, CancelNotification, Notification};
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -152,9 +152,13 @@ where
     S::Error: From<ResponseError>,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        if notif.method == notification::Cancel::METHOD {
+        if notif.method == CancelNotification::METHOD {
             if let Ok(params) = serde_json::from_value::<lsp_types::CancelParams>(notif.params) {
-                if let Some(handle) = self.ongoing.remove(&params.id) {
+                let req_id = match params.id {
+                    lsp_types::Id::String(string) => json_rpc::Id::String(string),
+                    lsp_types::Id::Int(int) => json_rpc::Id::Number(int as i64),
+                };
+                if let Some(handle) = self.ongoing.remove(&req_id) {
                     handle.abort();
                 }
             }

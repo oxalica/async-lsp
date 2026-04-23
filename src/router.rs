@@ -6,8 +6,8 @@ use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use lsp_types::notification::Notification;
-use lsp_types::request::Request;
+use lsp_types::Request;
+use lsp_types::{LspNotificationMethod, LspRequestMethod, Notification};
 use tower_service::Service;
 
 use crate::{
@@ -17,8 +17,8 @@ use crate::{
 /// A router dispatching requests and notifications to individual handlers.
 pub struct Router<St, Error = ResponseError> {
     state: St,
-    req_handlers: HashMap<&'static str, BoxReqHandler<St, Error>>,
-    notif_handlers: HashMap<&'static str, BoxNotifHandler<St>>,
+    req_handlers: HashMap<LspRequestMethod, BoxReqHandler<St, Error>>,
+    notif_handlers: HashMap<LspNotificationMethod, BoxNotifHandler<St>>,
     event_handlers: HashMap<TypeId, BoxEventHandler<St>>,
     unhandled_req: BoxReqHandler<St, Error>,
     unhandled_notif: BoxNotifHandler<St>,
@@ -62,7 +62,7 @@ where
                 .into())))
             }),
             unhandled_notif: Box::new(|_, notif| {
-                if notif.method.starts_with("$/") {
+                if notif.method.as_str().starts_with("$/") {
                     ControlFlow::Continue(())
                 } else {
                     ControlFlow::Break(Err(crate::Error::Routing(format!(
@@ -212,7 +212,7 @@ impl<St, Error> Service<AnyRequest> for Router<St, Error> {
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         let h = self
             .req_handlers
-            .get(&*req.method)
+            .get(&req.method)
             .unwrap_or(&self.unhandled_req);
         h(&mut self.state, req)
     }
@@ -222,7 +222,7 @@ impl<St> LspService for Router<St> {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
         let h = self
             .notif_handlers
-            .get(&*notif.method)
+            .get(&notif.method)
             .unwrap_or(&self.unhandled_notif);
         h(&mut self.state, notif)
     }

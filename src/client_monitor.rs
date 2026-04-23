@@ -20,7 +20,7 @@
 use std::ops::ControlFlow;
 use std::task::{Context, Poll};
 
-use lsp_types::request::{self, Request};
+use lsp_types::{InitializeRequest, Request};
 use tower_layer::Layer;
 use tower_service::Service;
 
@@ -47,7 +47,7 @@ impl<S: LspService> Service<AnyRequest> for ClientProcessMonitor<S> {
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
         if let Some(pid) = (|| -> Option<i32> {
-            (req.method == request::Initialize::METHOD)
+            (req.method == InitializeRequest::METHOD)
                 .then_some(&req.params)?
                 .as_object()?
                 .get("processId")?

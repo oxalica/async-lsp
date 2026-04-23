@@ -69,9 +69,8 @@ use futures::{
     pin_mut, select_biased, AsyncBufRead, AsyncBufReadExt, AsyncRead, AsyncReadExt, AsyncWrite,
     AsyncWriteExt, FutureExt, SinkExt, StreamExt,
 };
-use lsp_types::notification::Notification;
-use lsp_types::request::Request;
-use lsp_types::NumberOrString;
+use lsp_types::{LspNotificationMethod, Notification};
+use lsp_types::{LspRequestMethod, Request};
 use pin_project_lite::pin_project;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -304,7 +303,7 @@ impl ErrorCode {
 ///
 /// Though `null` is technically a valid id for responses, we reject it since it hardly makes sense
 /// for valid communication.
-pub type RequestId = NumberOrString;
+pub type RequestId = lsp_types::json_rpc::Id;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct RawMessage<T> {
@@ -343,7 +342,7 @@ pub struct AnyRequest {
     /// The request id.
     pub id: RequestId,
     /// The method to be invoked.
-    pub method: String,
+    pub method: LspRequestMethod,
     /// The method's params.
     #[serde(default)]
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
@@ -355,7 +354,7 @@ pub struct AnyRequest {
 #[non_exhaustive]
 pub struct AnyNotification {
     /// The method to be invoked.
-    pub method: String,
+    pub method: LspNotificationMethod,
     /// The notification's params.
     #[serde(default)]
     #[serde(skip_serializing_if = "serde_json::Value::is_null")]
@@ -616,7 +615,7 @@ where
     fn dispatch_event(&mut self, event: MainLoopEvent) -> ControlFlow<Result<()>, Option<Message>> {
         match event {
             MainLoopEvent::OutgoingRequest(mut req, resp_tx) => {
-                req.id = RequestId::Number(self.outgoing_id);
+                req.id = RequestId::Number(self.outgoing_id as i64);
                 assert!(self.outgoing.insert(req.id.clone(), resp_tx).is_none());
                 self.outgoing_id += 1;
                 ControlFlow::Continue(Some(Message::Request(req)))
@@ -739,7 +738,7 @@ impl PeerSocket {
     fn request<R: Request>(&self, params: R::Params) -> PeerSocketRequestFuture<R::Result> {
         let req = AnyRequest {
             id: RequestId::Number(0),
-            method: R::METHOD.into(),
+            method: R::METHOD,
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
         let (tx, rx) = oneshot::channel();
@@ -754,7 +753,7 @@ impl PeerSocket {
 
     fn notify<N: Notification>(&self, params: N::Params) -> Result<()> {
         let notif = AnyNotification {
-            method: N::METHOD.into(),
+            method: N::METHOD,
             params: serde_json::to_value(params).expect("Failed to serialize"),
         };
         self.send(MainLoopEvent::Outgoing(Message::Notification(notif)))
@@ -889,11 +888,11 @@ mod tests {
     async fn closed_client_socket() {
         let socket = ClientSocket::new_closed();
         assert!(matches!(
-            socket.notify::<lsp_types::notification::Exit>(()),
+            socket.notify::<lsp_types::ExitNotification>(()),
             Err(Error::ServiceStopped)
         ));
         assert!(matches!(
-            socket.request::<lsp_types::request::Shutdown>(()).await,
+            socket.request::<lsp_types::ShutdownRequest>(()).await,
             Err(Error::ServiceStopped)
         ));
         assert!(matches!(socket.emit(42i32), Err(Error::ServiceStopped)));
@@ -903,11 +902,11 @@ mod tests {
     async fn closed_server_socket() {
         let socket = ServerSocket::new_closed();
         assert!(matches!(
-            socket.notify::<lsp_types::notification::Exit>(()),
+            socket.notify::<lsp_types::ExitNotification>(()),
             Err(Error::ServiceStopped)
         ));
         assert!(matches!(
-            socket.request::<lsp_types::request::Shutdown>(()).await,
+            socket.request::<lsp_types::ShutdownRequest>(()).await,
             Err(Error::ServiceStopped)
         ));
         assert!(matches!(socket.emit(42i32), Err(Error::ServiceStopped)));

@@ -8,6 +8,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use lsp_types::LspRequestMethod;
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -24,9 +25,9 @@ pub struct CatchUnwind<S: LspService> {
 
 define_getters!(impl[S: LspService] CatchUnwind<S>, service: S);
 
-type Handler<E> = fn(method: &str, payload: Box<dyn Any + Send>) -> E;
+type Handler<E> = fn(method: LspRequestMethod, payload: Box<dyn Any + Send>) -> E;
 
-fn default_handler(method: &str, payload: Box<dyn Any + Send>) -> ResponseError {
+fn default_handler(method: LspRequestMethod, payload: Box<dyn Any + Send>) -> ResponseError {
     let msg = match payload.downcast::<String>() {
         Ok(msg) => *msg,
         Err(payload) => match payload.downcast::<&'static str>() {
@@ -54,7 +55,7 @@ impl<S: LspService> Service<AnyRequest> for CatchUnwind<S> {
         let method = req.method.clone();
         // FIXME: Clarify conditions of UnwindSafe.
         match catch_unwind(AssertUnwindSafe(|| self.service.call(req)))
-            .map_err(|err| (self.handler)(&method, err))
+            .map_err(|err| (self.handler)(method.clone(), err))
         {
             Ok(fut) => ResponseFuture {
                 inner: ResponseFutureInner::Future {
@@ -84,7 +85,7 @@ pin_project! {
         Future {
             #[pin]
             fut: Fut,
-            method: String,
+            method: LspRequestMethod,
             handler: Handler<Error>,
         },
         Ready {
@@ -109,7 +110,7 @@ where
                 // FIXME: Clarify conditions of UnwindSafe.
                 match catch_unwind(AssertUnwindSafe(|| fut.poll(cx))) {
                     Ok(poll) => poll,
-                    Err(payload) => Poll::Ready(Err(handler(method, payload))),
+                    Err(payload) => Poll::Ready(Err(handler(method.clone(), payload))),
                 }
             }
             ResponseFutureProj::Ready { err } => Poll::Ready(Err(err.take().expect("Completed"))),

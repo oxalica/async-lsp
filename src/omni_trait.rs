@@ -2,9 +2,10 @@ use std::future::ready;
 use std::ops::ControlFlow;
 
 use futures::future::BoxFuture;
-use lsp_types::notification::{self, Notification};
-use lsp_types::request::{self, Request};
-use lsp_types::{lsp_notification, lsp_request};
+use lsp_types::{
+    lsp_notification, lsp_request, ExitNotification, InitializeRequest, InitializedNotification,
+    Notification, Request, ShutdownRequest,
+};
 
 use crate::router::Router;
 use crate::{ClientSocket, ErrorCode, ResponseError, Result, ServerSocket};
@@ -12,6 +13,8 @@ use crate::{ClientSocket, ErrorCode, ResponseError, Result, ServerSocket};
 use self::sealed::NotifyResult;
 
 mod sealed {
+    use lsp_types::{ExitNotification, InitializedNotification};
+
     use super::*;
 
     pub trait NotifyResult {
@@ -20,9 +23,9 @@ mod sealed {
 
     impl NotifyResult for ControlFlow<crate::Result<()>> {
         fn fallback<N: Notification>() -> Self {
-            if N::METHOD.starts_with("$/")
-                || N::METHOD == notification::Exit::METHOD
-                || N::METHOD == notification::Initialized::METHOD
+            if N::METHOD.as_str().starts_with("$/")
+                || N::METHOD == ExitNotification::METHOD
+                || N::METHOD == InitializedNotification::METHOD
             {
                 ControlFlow::Continue(())
             } else {
@@ -94,14 +97,14 @@ macro_rules! define_server {
             #[must_use]
             fn initialize(
                 &mut self,
-                params: <request::Initialize as Request>::Params,
-            ) -> ResponseFuture<request::Initialize, Self::Error>;
+                params: <InitializeRequest as Request>::Params,
+            ) -> ResponseFuture<InitializeRequest, Self::Error>;
 
             #[must_use]
             fn shutdown(
                 &mut self,
-                (): <request::Shutdown as Request>::Params,
-            ) -> ResponseFuture<request::Shutdown, Self::Error> {
+                (): <ShutdownRequest as Request>::Params,
+            ) -> ResponseFuture<ShutdownRequest, Self::Error> {
                 Box::pin(ready(Ok(())))
             }
 
@@ -121,18 +124,18 @@ macro_rules! define_server {
             #[must_use]
             fn initialized(
                 &mut self,
-                params: <notification::Initialized as Notification>::Params,
+                params: <InitializedNotification as Notification>::Params,
             ) -> Self::NotifyResult {
                 let _ = params;
-                Self::NotifyResult::fallback::<notification::Initialized>()
+                Self::NotifyResult::fallback::<InitializedNotification>()
             }
 
             #[must_use]
             fn exit(
                 &mut self,
-                (): <notification::Exit as Notification>::Params,
+                (): <ExitNotification as Notification>::Params,
             ) -> Self::NotifyResult {
-                Self::NotifyResult::fallback::<notification::Exit>()
+                Self::NotifyResult::fallback::<ExitNotification>()
             }
 
             $(
@@ -157,16 +160,16 @@ macro_rules! define_server {
 
                     fn initialize(
                         &mut self,
-                        params: <request::Initialize as Request>::Params,
-                    ) -> ResponseFuture<request::Initialize, Self::Error> {
-                        Box::pin(self.0.request::<request::Initialize>(params))
+                        params: <InitializeRequest as Request>::Params,
+                    ) -> ResponseFuture<InitializeRequest, Self::Error> {
+                        Box::pin(self.0.request::<InitializeRequest>(params))
                     }
 
                     fn shutdown(
                         &mut self,
-                        (): <request::Shutdown as Request>::Params,
-                    ) -> ResponseFuture<request::Shutdown, Self::Error> {
-                        Box::pin(self.0.request::<request::Shutdown>(()))
+                        (): <ShutdownRequest as Request>::Params,
+                    ) -> ResponseFuture<ShutdownRequest, Self::Error> {
+                        Box::pin(self.0.request::<ShutdownRequest>(()))
                     }
 
                     $(
@@ -182,16 +185,16 @@ macro_rules! define_server {
 
                     fn initialized(
                         &mut self,
-                        params: <notification::Initialized as Notification>::Params,
+                        params: <InitializedNotification as Notification>::Params,
                     ) -> Self::NotifyResult {
-                        self.notify::<notification::Initialized>(params)
+                        self.notify::<InitializedNotification>(params)
                     }
 
                     fn exit(
                         &mut self,
-                        (): <notification::Exit as Notification>::Params,
+                        (): <ExitNotification as Notification>::Params,
                     ) -> Self::NotifyResult {
-                        self.notify::<notification::Exit>(())
+                        self.notify::<ExitNotification>(())
                     }
 
                     $(
@@ -218,11 +221,11 @@ macro_rules! define_server {
             #[must_use]
             pub fn from_language_server(state: S) -> Self {
                 let mut this = Self::new(state);
-                this.request::<request::Initialize, _>(|state, params| {
+                this.request::<InitializeRequest, _>(|state, params| {
                     let fut = state.initialize(params);
                     async move { fut.await.map_err(Into::into) }
                 });
-                this.request::<request::Shutdown, _>(|state, params| {
+                this.request::<ShutdownRequest, _>(|state, params| {
                     let fut = state.shutdown(params);
                     async move { fut.await.map_err(Into::into) }
                 });
@@ -230,8 +233,8 @@ macro_rules! define_server {
                     let fut = state.$req_snake(params);
                     async move { fut.await.map_err(Into::into) }
                 });)*
-                this.notification::<notification::Initialized>(|state, params| state.initialized(params));
-                this.notification::<notification::Exit>(|state, params| state.exit(params));
+                this.notification::<InitializedNotification>(|state, params| state.initialized(params));
+                this.notification::<ExitNotification>(|state, params| state.exit(params));
                 $(this.notification::<$notif>(|state, params| state.$notif_snake(params));)*
                 this
             }

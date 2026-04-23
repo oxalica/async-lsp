@@ -14,8 +14,8 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use futures::future::Either;
-use lsp_types::notification::{self, Notification};
-use lsp_types::request::{self, Request};
+use lsp_types::{ExitNotification, InitializedNotification, Notification, ShutdownRequest};
+use lsp_types::{InitializeRequest, Request};
 use pin_project_lite::pin_project;
 use tower_layer::Layer;
 use tower_service::Service;
@@ -68,8 +68,8 @@ where
     }
 
     fn call(&mut self, req: AnyRequest) -> Self::Future {
-        let inner = match (self.state, &*req.method) {
-            (State::Uninitialized, request::Initialize::METHOD) => {
+        let inner = match (self.state, &req.method) {
+            (State::Uninitialized, &InitializeRequest::METHOD) => {
                 self.state = State::Initializing;
                 Either::Left(self.service.call(req))
             }
@@ -81,14 +81,14 @@ where
                 }
                 .into())))
             }
-            (_, request::Initialize::METHOD) => Either::Right(ready(Err(ResponseError {
+            (_, &InitializeRequest::METHOD) => Either::Right(ready(Err(ResponseError {
                 code: ErrorCode::INVALID_REQUEST,
                 message: "Server is already initialized".into(),
                 data: None,
             }
             .into()))),
             (State::Ready, _) => {
-                if req.method == request::Shutdown::METHOD {
+                if req.method == ShutdownRequest::METHOD {
                     self.state = State::ShuttingDown;
                 }
                 Either::Left(self.service.call(req))
@@ -109,12 +109,12 @@ where
     S::Error: From<ResponseError>,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        match &*notif.method {
-            notification::Exit::METHOD => {
+        match notif.method {
+            ExitNotification::METHOD => {
                 self.service.notify(notif)?;
                 ControlFlow::Break(Ok(()))
             }
-            notification::Initialized::METHOD => {
+            InitializedNotification::METHOD => {
                 if self.state != State::Initializing {
                     return ControlFlow::Break(Err(Error::Protocol(format!(
                         "Unexpected initialized notification on state {:?}",
