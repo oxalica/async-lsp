@@ -552,18 +552,41 @@ where
                 resp = self.tasks.select_next_some() => ControlFlow::Continue(Some(Message::Response(resp))),
                 event = self.rx.next() => self.dispatch_event(event.expect("Sender is alive")),
                 msg = incoming.next() => {
-                    let dispatch_fut = self.dispatch_message(msg.expect("Never ends")?).fuse();
-                    pin_mut!(dispatch_fut);
-                    // NB. Concurrently wait for `poll_ready`, and write out the last message.
-                    // If the service is waiting for client's response of the last request, while
-                    // the last message is not delivered on the first write, it can deadlock.
-                    loop {
-                        select_biased! {
-                            // Dispatch first. It usually succeeds immediately for non-requests,
-                            // and the service is hardly busy.
-                            ctl = dispatch_fut => break ctl,
-                            ret = flush_fut => { ret?; continue }
+                    let msg = msg.expect("Never ends")?;
+                    if let Message::Request(req) = msg {
+                        // Wait for `poll_ready` without borrowing all of `self`,
+                        // so in-flight tasks can finish and free Concurrency slots.
+                        // Also flush: if the service is waiting for the client's
+                        // response to the last write, stalling flush deadlocks.
+                        let ready = loop {
+                            let service = &mut self.service;
+                            let tasks = &mut self.tasks;
+                            let ready_fut = poll_fn(|cx| service.poll_ready(cx)).fuse();
+                            pin_mut!(ready_fut);
+                            select_biased! {
+                                ret = ready_fut => break ret,
+                                ret = flush_fut => {
+                                    ret?;
+                                    continue;
+                                }
+                                resp = tasks.select_next_some() => {
+                                    outgoing.feed(Message::Response(resp)).await?;
+                                    flush_fut = outgoing.flush().fuse();
+                                    continue;
+                                }
+                            }
+                        };
+                        if let Err(err) = ready {
+                            ControlFlow::Continue(Some(Message::Response(AnyResponse {
+                                id: req.id,
+                                result: None,
+                                error: Some(err.into()),
+                            })))
+                        } else {
+                            self.dispatch_message(Message::Request(req))
                         }
+                    } else {
+                        self.dispatch_message(msg)
                     }
                 }
             };
@@ -585,17 +608,9 @@ where
         ret.and(flush_ret)
     }
 
-    async fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
+    fn dispatch_message(&mut self, msg: Message) -> ControlFlow<Result<()>, Option<Message>> {
         match msg {
             Message::Request(req) => {
-                if let Err(err) = poll_fn(|cx| self.service.poll_ready(cx)).await {
-                    let resp = AnyResponse {
-                        id: req.id,
-                        result: None,
-                        error: Some(err.into()),
-                    };
-                    return ControlFlow::Continue(Some(Message::Response(resp)));
-                }
                 let id = req.id.clone();
                 let fut = self.service.call(req);
                 self.tasks.push(RequestFuture { fut, id: Some(id) });
