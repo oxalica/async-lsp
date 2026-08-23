@@ -1,7 +1,10 @@
 //! An example for unit-testing via mocking servers and/or clients.
 // TODO: Make this more egornomic. Maybe provide some test APIs?
+use std::num::NonZeroUsize;
 use std::ops::ControlFlow;
+use std::time::Duration;
 
+use async_lsp::concurrency::ConcurrencyLayer;
 use async_lsp::router::Router;
 use async_lsp::server::LifecycleLayer;
 use async_lsp::{ClientSocket, LanguageClient, LanguageServer};
@@ -152,6 +155,110 @@ async fn mock_server_and_client() {
     server.exit(()).unwrap();
 
     // Both main loop should be shutdown.
+    server_main.await.expect("no panic");
+    client_main.await.expect("no panic");
+}
+
+fn hover_params(line: u32) -> HoverParams {
+    HoverParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier::new("file:///foo".parse().unwrap()),
+            position: Position::new(line, 0),
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+    }
+}
+
+fn hover_text(hover: Option<Hover>) -> String {
+    match hover {
+        Some(Hover {
+            contents: HoverContents::Scalar(MarkedString::String(text)),
+            ..
+        }) => text,
+        other => panic!("unexpected hover response: {other:?}"),
+    }
+}
+
+/// Two overlapping requests with `ConcurrencyLayer` cap 1 must both complete.
+///
+/// `MainLoop` used to wait for `poll_ready` without polling in-flight request
+/// futures, so the semaphore never released and the second request hung.
+#[tokio::test(flavor = "current_thread")]
+async fn concurrency_at_capacity_completes_both_requests() {
+    let (server_main, _client) = async_lsp::MainLoop::new_server(|client| {
+        let mut router = Router::new(ServerState { client });
+        router
+            .request::<request::Initialize, _>(|_st, _params| async move {
+                Ok(InitializeResult {
+                    capabilities: ServerCapabilities {
+                        hover_provider: Some(HoverProviderCapability::Simple(true)),
+                        ..ServerCapabilities::default()
+                    },
+                    server_info: None,
+                })
+            })
+            .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
+            .request::<request::Shutdown, _>(|_, _| async move { Ok(()) })
+            .notification::<notification::Exit>(|_, _| ControlFlow::Break(Ok(())))
+            .request::<request::HoverRequest, _>(|_st, params| async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let line = params.text_document_position_params.position.line;
+                Ok(Some(Hover {
+                    contents: HoverContents::Scalar(MarkedString::String(format!("hover-{line}"))),
+                    range: None,
+                }))
+            });
+
+        ServiceBuilder::new()
+            .layer(LifecycleLayer::default())
+            .layer(ConcurrencyLayer::new(NonZeroUsize::new(1).unwrap()))
+            .service(router)
+    });
+
+    let (client_main, mut server) = async_lsp::MainLoop::new_client(|_server| Router::new(()));
+
+    let (server_stream, client_stream) = tokio::io::duplex(MEMORY_CHANNEL_SIZE);
+    let (server_rx, server_tx) = server_stream.compat().split();
+    let server_main = tokio::spawn(async move {
+        server_main
+            .run_buffered(server_rx, server_tx)
+            .await
+            .unwrap();
+    });
+    let (client_rx, client_tx) = client_stream.compat().split();
+    let client_main = tokio::spawn(async move {
+        let err = client_main
+            .run_buffered(client_rx, client_tx)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, async_lsp::Error::Eof),
+            "should fail due to EOF: {err}"
+        );
+    });
+
+    server
+        .initialize(InitializeParams::default())
+        .await
+        .unwrap();
+    server.initialized(InitializedParams {}).unwrap();
+
+    let mut server2 = server.clone();
+    let both = async {
+        tokio::join!(
+            server.hover(hover_params(1)),
+            server2.hover(hover_params(2)),
+        )
+    };
+    let (first, second) = tokio::time::timeout(Duration::from_secs(5), both)
+        .await
+        .expect("both hovers should complete when Concurrency is at capacity");
+
+    assert_eq!(hover_text(first.unwrap()), "hover-1");
+    assert_eq!(hover_text(second.unwrap()), "hover-2");
+
+    server.shutdown(()).await.unwrap();
+    server.exit(()).unwrap();
     server_main.await.expect("no panic");
     client_main.await.expect("no panic");
 }
