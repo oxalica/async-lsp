@@ -5,7 +5,8 @@
 //! This middleware handles
 //! [the lifecycle of Language Servers](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#lifeCycleMessages),
 //! specifically:
-//! - Exit the main loop with `ControlFlow::Break(Ok(()))` on `exit` notification.
+//! - Exit the main loop successfully on `exit` after `shutdown`, or with a protocol error if
+//!   `shutdown` was not received, unless the handler explicitly returns a result.
 //! - Responds unrelated requests with errors and ignore unrelated notifications during
 //!   initialization and shutting down.
 use std::future::{ready, Future, Ready};
@@ -53,6 +54,18 @@ impl<S> Lifecycle<S> {
             state: State::Uninitialized,
         }
     }
+
+    fn warn_unexpected_message(&self, kind: &'static str, method: &str) {
+        #[cfg(feature = "tracing")]
+        ::tracing::warn!(
+            state = ?self.state,
+            kind,
+            method,
+            "Received a message outside the expected server lifecycle"
+        );
+        #[cfg(not(feature = "tracing"))]
+        let _ = (kind, method);
+    }
 }
 
 impl<S: LspService> Service<AnyRequest> for Lifecycle<S>
@@ -73,7 +86,17 @@ where
                 self.state = State::Initializing;
                 Either::Left(self.service.call(req))
             }
+            (_, request::Initialize::METHOD) => {
+                self.warn_unexpected_message("request", &req.method);
+                Either::Right(ready(Err(ResponseError {
+                    code: ErrorCode::INVALID_REQUEST,
+                    message: "Server is already initialized".into(),
+                    data: None,
+                }
+                .into())))
+            }
             (State::Uninitialized | State::Initializing, _) => {
+                self.warn_unexpected_message("request", &req.method);
                 Either::Right(ready(Err(ResponseError {
                     code: ErrorCode::SERVER_NOT_INITIALIZED,
                     message: "Server is not initialized yet".into(),
@@ -81,24 +104,21 @@ where
                 }
                 .into())))
             }
-            (_, request::Initialize::METHOD) => Either::Right(ready(Err(ResponseError {
-                code: ErrorCode::INVALID_REQUEST,
-                message: "Server is already initialized".into(),
-                data: None,
-            }
-            .into()))),
             (State::Ready, _) => {
                 if req.method == request::Shutdown::METHOD {
                     self.state = State::ShuttingDown;
                 }
                 Either::Left(self.service.call(req))
             }
-            (State::ShuttingDown, _) => Either::Right(ready(Err(ResponseError {
-                code: ErrorCode::INVALID_REQUEST,
-                message: "Server is shutting down".into(),
-                data: None,
+            (State::ShuttingDown, _) => {
+                self.warn_unexpected_message("request", &req.method);
+                Either::Right(ready(Err(ResponseError {
+                    code: ErrorCode::INVALID_REQUEST,
+                    message: "Server is shutting down".into(),
+                    data: None,
+                }
+                .into())))
             }
-            .into()))),
         };
         ResponseFuture { inner }
     }
@@ -109,23 +129,36 @@ where
     S::Error: From<ResponseError>,
 {
     fn notify(&mut self, notif: AnyNotification) -> ControlFlow<Result<()>> {
-        match &*notif.method {
-            notification::Exit::METHOD => {
-                self.service.notify(notif)?;
-                ControlFlow::Break(Ok(()))
-            }
-            notification::Initialized::METHOD => {
-                if self.state != State::Initializing {
-                    return ControlFlow::Break(Err(Error::Protocol(format!(
-                        "Unexpected initialized notification on state {:?}",
-                        self.state
-                    ))));
+        match (self.state, &*notif.method) {
+            (_, notification::Exit::METHOD) => {
+                let state = self.state;
+                if state != State::ShuttingDown {
+                    self.warn_unexpected_message("notification", &notif.method);
                 }
-                self.state = State::Ready;
                 self.service.notify(notif)?;
+                ControlFlow::Break(match state {
+                    State::ShuttingDown => Ok(()),
+                    _ => Err(Error::Protocol(
+                        "Exit notification received before shutdown".into(),
+                    )),
+                })
+            }
+            (State::Initializing, notification::Initialized::METHOD) => {
+                self.state = State::Ready;
+                self.service.notify(notif)
+            }
+            (State::Ready, notification::Initialized::METHOD) => {
+                self.warn_unexpected_message("notification", &notif.method);
+                ControlFlow::Break(Err(Error::Protocol(format!(
+                    "Unexpected initialized notification on state {:?}",
+                    self.state
+                ))))
+            }
+            (State::Uninitialized | State::Initializing | State::ShuttingDown, _) => {
+                self.warn_unexpected_message("notification", &notif.method);
                 ControlFlow::Continue(())
             }
-            _ => self.service.notify(notif),
+            (State::Ready, _) => self.service.notify(notif),
         }
     }
 

@@ -43,7 +43,7 @@ async fn mock_server_and_client() {
             })
             .notification::<notification::Initialized>(|_, _| ControlFlow::Continue(()))
             .request::<request::Shutdown, _>(|_, _| async move { Ok(()) })
-            .notification::<notification::Exit>(|_, _| ControlFlow::Break(Ok(())))
+            .notification::<notification::Exit>(|_, _| ControlFlow::Continue(()))
             .request::<request::HoverRequest, _>(|st, _params| {
                 let mut client = st.client.clone();
                 async move {
